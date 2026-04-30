@@ -1,7 +1,7 @@
-import { MapPin, DollarSign, ExternalLink, Building2, Clock, Calendar } from 'lucide-react'
+import { useState } from 'react'
+import { MapPin, DollarSign, ExternalLink, Building2, Clock, Calendar, CheckCircle2, Send } from 'lucide-react'
 import { formatDistanceToNow, parseISO, format } from 'date-fns'
 
-// Role category → badge colour mapping
 const CATEGORY_COLORS = {
   'Agentic AI Engineer':               'bg-purple-500/20 text-purple-300 border-purple-500/40',
   'AI / ML Engineer':                  'bg-blue-500/20 text-blue-300 border-blue-500/40',
@@ -25,44 +25,61 @@ const CATEGORY_COLORS = {
 }
 
 const SOURCE_COLORS = {
-  'Adzuna':         'bg-orange-500/10 text-orange-400',
-  'Dice.com':       'bg-red-500/10 text-red-400',
-  'Remotive.com':   'bg-teal-500/10 text-teal-400',
-  'Jobicy.com':     'bg-blue-500/10 text-blue-400',
-  'WeWorkRemotely': 'bg-indigo-500/10 text-indigo-400',
-  'Himalayas.app':  'bg-violet-500/10 text-violet-400',
-  'WorkingNomads':  'bg-cyan-500/10 text-cyan-400',
-  'Remote.co':      'bg-green-500/10 text-green-400',
-  'SimplyHired':    'bg-sky-500/10 text-sky-400',
-  'ZipRecruiter':   'bg-amber-500/10 text-amber-400',
+  'Adzuna':          'bg-orange-500/10 text-orange-400',
+  'Dice.com':        'bg-red-500/10 text-red-400',
+  'Remotive.com':    'bg-teal-500/10 text-teal-400',
+  'Jobicy.com':      'bg-blue-500/10 text-blue-400',
+  'WeWorkRemotely':  'bg-indigo-500/10 text-indigo-400',
+  'Himalayas.app':   'bg-violet-500/10 text-violet-400',
+  'WorkingNomads':   'bg-cyan-500/10 text-cyan-400',
+  'Remote.co':       'bg-green-500/10 text-green-400',
+  'SimplyHired':     'bg-sky-500/10 text-sky-400',
+  'ZipRecruiter':    'bg-amber-500/10 text-amber-400',
   "HN Who's Hiring": 'bg-rose-500/10 text-rose-400',
 }
 
 function fmtDate(iso) {
   if (!iso) return null
-  try {
-    return format(parseISO(iso), 'MMM d, yyyy')
-  } catch {
-    return iso.slice(0, 10)
-  }
+  try { return format(parseISO(iso), 'MMM d, yyyy') }
+  catch { return iso.slice(0, 10) }
 }
 
 function fmtRelative(iso) {
   if (!iso) return null
+  try { return formatDistanceToNow(parseISO(iso), { addSuffix: true }) }
+  catch { return null }
+}
+
+function isApplied(id) {
   try {
-    return formatDistanceToNow(parseISO(iso), { addSuffix: true })
-  } catch {
-    return null
-  }
+    return JSON.parse(localStorage.getItem('appliedJobs') || '[]').includes(id)
+  } catch { return false }
+}
+
+function toggleApplied(id) {
+  try {
+    const saved = JSON.parse(localStorage.getItem('appliedJobs') || '[]')
+    const updated = saved.includes(id) ? saved.filter(x => x !== id) : [...saved, id]
+    localStorage.setItem('appliedJobs', JSON.stringify(updated))
+    return updated.includes(id)
+  } catch { return false }
 }
 
 export default function JobCard({ job }) {
+  const [applied, setApplied] = useState(() => isApplied(job.id))
+
   const catColor  = CATEGORY_COLORS[job.role_category] ?? 'bg-slate-500/20 text-slate-300 border-slate-500/40'
   const srcColor  = SOURCE_COLORS[job.source] ?? 'bg-slate-500/10 text-slate-400'
   const scoreWide = Math.round((job.semantic_score ?? 0) * 100)
 
+  const handleApply = () => {
+    const next = toggleApplied(job.id)
+    setApplied(next)
+    if (next) window.open(job.url, '_blank', 'noopener,noreferrer')
+  }
+
   return (
-    <article className="card p-4 flex flex-col gap-3 animate-slide-up">
+    <article className={`card p-4 flex flex-col gap-3 animate-slide-up transition-all ${applied ? 'border-green-500/30 bg-green-950/10' : ''}`}>
       {/* Top row: category + source */}
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <span className={`badge border text-[10px] leading-tight ${catColor}`}>
@@ -125,7 +142,7 @@ export default function JobCard({ job }) {
         )}
         {scoreWide > 0 && (
           <span className="badge bg-slate-700/50 text-slate-400 border border-slate-600/40 text-[10px] font-mono">
-            AI score {scoreWide}%
+            AI {scoreWide}%
           </span>
         )}
       </div>
@@ -133,23 +150,30 @@ export default function JobCard({ job }) {
       {/* Semantic score bar */}
       {scoreWide > 0 && (
         <div className="w-full bg-slate-700/30 rounded-full h-[3px]">
-          <div
-            className="score-bar h-full rounded-full"
-            style={{ width: `${Math.min(scoreWide, 100)}%` }}
-          />
+          <div className="score-bar h-full rounded-full" style={{ width: `${Math.min(scoreWide, 100)}%` }} />
         </div>
       )}
 
-      {/* Footer: dates */}
-      <div className="flex items-center justify-between text-[10px] text-slate-600 pt-1 border-t border-slate-700/40">
-        <span className="flex items-center gap-1">
+      {/* Footer: date + apply button */}
+      <div className="flex items-center justify-between pt-1 border-t border-slate-700/40 gap-2">
+        <span className="flex items-center gap-1 text-[10px] text-slate-600">
           <Calendar size={10} />
           {job.posted_date ? `Posted ${fmtDate(job.posted_date)}` : 'Date unknown'}
         </span>
-        <span className="flex items-center gap-1">
-          <Clock size={10} />
-          Scraped {fmtRelative(job.scraped_at) ?? fmtDate(job.scraped_at)}
-        </span>
+
+        <button
+          onClick={handleApply}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all shrink-0
+            ${applied
+              ? 'bg-green-500/20 text-green-300 border-green-500/40 cursor-default'
+              : 'bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25'
+            }`}
+        >
+          {applied
+            ? <><CheckCircle2 size={11} /> Applied</>
+            : <><Send size={11} /> Apply</>
+          }
+        </button>
       </div>
     </article>
   )

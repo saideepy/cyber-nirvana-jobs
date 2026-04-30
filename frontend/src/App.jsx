@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, SearchX, LayoutGrid } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, SearchX, LayoutGrid, Zap } from 'lucide-react'
 import Header from './components/Header'
 import StatsBar from './components/StatsBar'
 import FilterPanel from './components/FilterPanel'
@@ -161,26 +161,58 @@ export default function App() {
           )}
 
           {/* Job grid */}
-          {!loading && jobs.length > 0 && (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-2">
-                {jobs.map(job => (
-                  <JobCard key={job.id} job={job} />
-                ))}
-              </div>
+          {!loading && jobs.length > 0 && (() => {
+            const topMatches  = jobs.filter(j => (j.semantic_score ?? 0) >= 0.30)
+            const regularJobs = jobs.filter(j => (j.semantic_score ?? 0) <  0.30)
+            return (
+              <>
+                {/* Top AI Matches section */}
+                {topMatches.length > 0 && (
+                  <div className="mb-6 mt-2">
+                    <div className="flex items-center gap-2 mb-3 px-1">
+                      <Zap size={14} className="text-yellow-400" />
+                      <span className="text-sm font-semibold text-yellow-300">Top AI Matches</span>
+                      <span className="badge bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 text-[10px]">
+                        {topMatches.length} jobs · ≥30% AI score
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                      {topMatches.map(job => <JobCard key={job.id} job={job} />)}
+                    </div>
+                  </div>
+                )}
 
-              {/* Pagination */}
-              {pages > 1 && (
-                <Pagination
-                  page={page}
-                  pages={pages}
-                  total={total}
-                  perPage={perPage}
-                  onPageChange={setPage}
-                />
-              )}
-            </>
-          )}
+                {/* All other jobs */}
+                {regularJobs.length > 0 && (
+                  <div>
+                    {topMatches.length > 0 && (
+                      <div className="flex items-center gap-2 mb-3 px-1">
+                        <LayoutGrid size={14} className="text-slate-400" />
+                        <span className="text-sm font-semibold text-slate-400">Other Jobs</span>
+                        <span className="badge bg-slate-700/50 text-slate-400 border border-slate-600/40 text-[10px]">
+                          {regularJobs.length} jobs
+                        </span>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                      {regularJobs.map(job => <JobCard key={job.id} job={job} />)}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pagination */}
+                {pages > 1 && (
+                  <Pagination
+                    page={page}
+                    pages={pages}
+                    total={total}
+                    perPage={perPage}
+                    onPageChange={setPage}
+                  />
+                )}
+              </>
+            )
+          })()}
         </main>
       </div>
     </div>
