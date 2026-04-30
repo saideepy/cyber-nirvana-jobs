@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 # ── date config ────────────────────────────────────────────────────────────────
-MAX_AGE_DAYS = 7
+MAX_AGE_DAYS = 2
 CUTOFF_DT = datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS)
 
 

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from database import Job, SessionLocal, create_tables
 from scrapers import run_all_scrapers
 from semantic import semantic_score, SEMANTIC_THRESHOLD, AI_RELATED_LABEL
-from utils import match_role, is_c2c, is_vendor, extract_pay, _is_recent, _fmt_date, _refresh_cutoff
+from utils import match_role, is_c2c, is_vendor, extract_pay, _is_recent, _fmt_date, _refresh_cutoff, MAX_AGE_DAYS
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -63,7 +63,22 @@ def run_scrape():
 
     db = SessionLocal()
     try:
+        # Purge jobs older than MAX_AGE_DAYS so the board stays fresh
+        cutoff_str = (datetime.utcnow() - timedelta(days=MAX_AGE_DAYS)).strftime("%Y-%m-%d")
+        deleted = db.query(Job).filter(
+            Job.posted_date != "",
+            Job.posted_date < cutoff_str,
+        ).delete(synchronize_session=False)
+        db.commit()
+        if deleted:
+            print(f"[Scraper] Purged {deleted} jobs older than {MAX_AGE_DAYS} days.")
+
         existing_urls = {row.url for row in db.query(Job.url).all()}
+        # Title+company combo dedup — catches same job posted on multiple boards
+        existing_combos = {
+            (r.title.lower().strip(), r.company.lower().strip())
+            for r in db.query(Job.title, Job.company).all()
+        }
         seen_this_run: set[str] = set()
         added = 0
 
@@ -72,6 +87,11 @@ def run_scrape():
             if not url or url in seen_this_run or url in existing_urls:
                 continue
             seen_this_run.add(url)
+
+            combo = (raw.get("title", "").lower().strip(), raw.get("company", "").lower().strip())
+            if combo[0] and combo in existing_combos:
+                continue
+            existing_combos.add(combo)
 
             posted_raw = raw.get("posted_raw", raw.get("posted", ""))
             if not _is_recent(posted_raw):
