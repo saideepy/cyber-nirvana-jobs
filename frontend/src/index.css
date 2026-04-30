@@ -27,6 +27,11 @@
   }
 }
 
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
 @layer components {
   .card {
     @apply bg-slate-800/60 border border-slate-700/60 rounded-xl backdrop-blur-sm

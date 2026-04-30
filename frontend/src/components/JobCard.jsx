@@ -24,17 +24,23 @@ const CATEGORY_COLORS = {
 }
 
 const SOURCE_COLORS = {
-  'Adzuna':          'bg-orange-500/10 text-orange-400',
-  'Dice.com':        'bg-red-500/10 text-red-400',
-  'Remotive.com':    'bg-teal-500/10 text-teal-400',
-  'Jobicy.com':      'bg-blue-500/10 text-blue-400',
-  'WeWorkRemotely':  'bg-indigo-500/10 text-indigo-400',
-  'Himalayas.app':   'bg-violet-500/10 text-violet-400',
-  'WorkingNomads':   'bg-cyan-500/10 text-cyan-400',
-  'Remote.co':       'bg-green-500/10 text-green-400',
-  'SimplyHired':     'bg-sky-500/10 text-sky-400',
-  'ZipRecruiter':    'bg-amber-500/10 text-amber-400',
-  "HN Who's Hiring": 'bg-rose-500/10 text-rose-400',
+  // Scraped directly
+  'Adzuna':           'bg-orange-500/10 text-orange-400',
+  'Dice.com':         'bg-red-500/10 text-red-400',
+  'Remotive.com':     'bg-teal-500/10 text-teal-400',
+  'Jobicy.com':       'bg-blue-500/10 text-blue-400',
+  'WeWorkRemotely':   'bg-indigo-500/10 text-indigo-400',
+  'Himalayas.app':    'bg-violet-500/10 text-violet-400',
+  'WorkingNomads':    'bg-cyan-500/10 text-cyan-400',
+  'Arbeitnow':        'bg-cyan-400/10 text-cyan-300',
+  'The Muse':         'bg-pink-500/10 text-pink-400',
+  "HN Who's Hiring":  'bg-rose-500/10 text-rose-400',
+  // Via JSearch aggregation
+  'LinkedIn':         'bg-blue-600/10 text-blue-400',
+  'Indeed':           'bg-sky-600/10 text-sky-300',
+  'ZipRecruiter':     'bg-amber-500/10 text-amber-400',
+  'Glassdoor':        'bg-emerald-500/10 text-emerald-400',
+  'Monster':          'bg-purple-500/10 text-purple-400',
 }
 
 function fmtDate(iso) {

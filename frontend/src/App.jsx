@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Loader2, SearchX, LayoutGrid, Zap } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, SearchX, LayoutGrid, Zap, Globe2 } from 'lucide-react'
 import { useAuth } from './context/AuthContext'
 import Header from './components/Header'
 import StatsBar from './components/StatsBar'
@@ -49,6 +49,82 @@ function FullScreenLoader() {
     </div>
   )
 }
+
+// ── Platform source bar ───────────────────────────────────────────────────────
+
+const PLATFORM_CONFIG = {
+  'LinkedIn':         { label: 'LinkedIn',       ring: 'ring-blue-500',    bg: 'bg-blue-500/15',    text: 'text-blue-300',    border: 'border-blue-500/40',    dot: 'bg-blue-400'    },
+  'Indeed':           { label: 'Indeed',          ring: 'ring-sky-500',     bg: 'bg-sky-500/15',     text: 'text-sky-300',     border: 'border-sky-500/40',     dot: 'bg-sky-400'     },
+  'ZipRecruiter':     { label: 'ZipRecruiter',    ring: 'ring-amber-500',   bg: 'bg-amber-500/15',   text: 'text-amber-300',   border: 'border-amber-500/40',   dot: 'bg-amber-400'   },
+  'Glassdoor':        { label: 'Glassdoor',       ring: 'ring-emerald-500', bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/40', dot: 'bg-emerald-400' },
+  'Monster':          { label: 'Monster',         ring: 'ring-purple-500',  bg: 'bg-purple-500/15',  text: 'text-purple-300',  border: 'border-purple-500/40',  dot: 'bg-purple-400'  },
+  'Dice.com':         { label: 'Dice.com',        ring: 'ring-red-500',     bg: 'bg-red-500/15',     text: 'text-red-300',     border: 'border-red-500/40',     dot: 'bg-red-400'     },
+  'Adzuna':           { label: 'Adzuna',          ring: 'ring-orange-500',  bg: 'bg-orange-500/15',  text: 'text-orange-300',  border: 'border-orange-500/40',  dot: 'bg-orange-400'  },
+  'WeWorkRemotely':   { label: 'WeWorkRemotely',  ring: 'ring-indigo-500',  bg: 'bg-indigo-500/15',  text: 'text-indigo-300',  border: 'border-indigo-500/40',  dot: 'bg-indigo-400'  },
+  'Remotive.com':     { label: 'Remotive',        ring: 'ring-teal-500',    bg: 'bg-teal-500/15',    text: 'text-teal-300',    border: 'border-teal-500/40',    dot: 'bg-teal-400'    },
+  'Himalayas.app':    { label: 'Himalayas',       ring: 'ring-violet-500',  bg: 'bg-violet-500/15',  text: 'text-violet-300',  border: 'border-violet-500/40',  dot: 'bg-violet-400'  },
+  'Arbeitnow':        { label: 'Arbeitnow',       ring: 'ring-cyan-500',    bg: 'bg-cyan-500/15',    text: 'text-cyan-300',    border: 'border-cyan-500/40',    dot: 'bg-cyan-400'    },
+  'The Muse':         { label: 'The Muse',        ring: 'ring-pink-500',    bg: 'bg-pink-500/15',    text: 'text-pink-300',    border: 'border-pink-500/40',    dot: 'bg-pink-400'    },
+  'Jobicy.com':       { label: 'Jobicy',          ring: 'ring-blue-400',    bg: 'bg-blue-400/15',    text: 'text-blue-200',    border: 'border-blue-400/40',    dot: 'bg-blue-300'    },
+  'WorkingNomads':    { label: 'WorkingNomads',   ring: 'ring-cyan-400',    bg: 'bg-cyan-400/15',    text: 'text-cyan-200',    border: 'border-cyan-400/40',    dot: 'bg-cyan-300'    },
+  "HN Who's Hiring":  { label: "HN Hiring",       ring: 'ring-rose-500',    bg: 'bg-rose-500/15',    text: 'text-rose-300',    border: 'border-rose-500/40',    dot: 'bg-rose-400'    },
+}
+
+const FEATURED_PLATFORMS = [
+  'LinkedIn', 'Indeed', 'ZipRecruiter', 'Glassdoor', 'Monster', 'Dice.com',
+]
+
+function SourceBar({ stats, activeSource, onSelect }) {
+  const counts   = stats?.by_source ?? {}
+  const allSrcs  = stats?.all_sources ?? []
+
+  // Featured platforms always shown (grayed if no jobs yet); then active non-featured sources
+  const featured = FEATURED_PLATFORMS.map(name => ({ name, count: counts[name] ?? 0, pinned: true }))
+  const rest     = allSrcs
+    .filter(s => !FEATURED_PLATFORMS.includes(s) && (counts[s] ?? 0) > 0)
+    .map(name => ({ name, count: counts[name] ?? 0, pinned: false }))
+
+  const platforms = [...featured, ...rest]
+
+  return (
+    <div className="mb-5">
+      <div className="flex items-center gap-2 mb-2.5 px-0.5">
+        <Globe2 size={13} className="text-slate-400 shrink-0" />
+        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Job Platforms</span>
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+        {platforms.map(({ name, count }) => {
+          const cfg      = PLATFORM_CONFIG[name] ?? { label: name, ring: 'ring-slate-500', bg: 'bg-slate-500/15', text: 'text-slate-300', border: 'border-slate-500/40', dot: 'bg-slate-400' }
+          const isActive = activeSource === name
+          const isEmpty  = count === 0
+          return (
+            <button
+              key={name}
+              onClick={() => !isEmpty && onSelect(isActive ? '' : name)}
+              title={isEmpty ? 'No jobs scraped yet from this source' : `${count.toLocaleString()} jobs from ${cfg.label}`}
+              className={`shrink-0 flex flex-col items-start gap-1 px-3 py-2 rounded-xl border transition-all duration-150
+                ${isActive
+                  ? `${cfg.bg} ${cfg.border} ${cfg.text} ring-1 ${cfg.ring} shadow-md scale-[1.03]`
+                  : isEmpty
+                    ? 'bg-slate-800/30 border-slate-700/30 text-slate-600 cursor-default'
+                    : `bg-slate-800/50 border-slate-700/40 ${cfg.text} hover:${cfg.bg} hover:${cfg.border} hover:scale-[1.02]`
+                }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isEmpty ? 'bg-slate-600' : cfg.dot}`} />
+                <span className="text-[11px] font-semibold whitespace-nowrap">{cfg.label}</span>
+              </div>
+              <span className={`text-[10px] font-mono pl-3 ${isEmpty ? 'text-slate-600' : 'opacity-70'}`}>
+                {isEmpty ? 'no jobs yet' : `${count.toLocaleString()} jobs`}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 
 // ── Job board page ────────────────────────────────────────────────────────────
 
@@ -197,6 +273,12 @@ function JobBoardPage() {
 
         <main className="flex-1 py-4 min-w-0">
           <StatsBar stats={stats} filtered={total} />
+
+          <SourceBar
+            stats={stats}
+            activeSource={filters.source}
+            onSelect={(src) => handleFilterChange('source', src)}
+          />
 
           {error && (
             <div className="mb-4 p-4 bg-red-900/30 border border-red-500/40 rounded-xl text-sm text-red-300">
