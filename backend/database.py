@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean,
-    Float, DateTime, Text
+    Float, DateTime, Text, ForeignKey
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -35,6 +35,42 @@ class Job(Base):
     is_vendor      = Column(Boolean, default=False)
     semantic_score = Column(Float, default=0.0)
     status         = Column(String, default="new")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    username      = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    is_admin      = Column(Boolean, default=False)
+    is_active     = Column(Boolean, default=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    user_id       = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token         = Column(String, unique=True, nullable=False, index=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    last_seen     = Column(DateTime, default=datetime.utcnow)
+    logged_out_at = Column(DateTime, nullable=True)
+    is_active     = Column(Boolean, default=True)
+
+
+class JobApplication(Base):
+    __tablename__ = "job_applications"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    job_id       = Column(Integer, nullable=False)
+    job_title    = Column(String, default="")
+    job_category = Column(String, default="")
+    job_url      = Column(String, default="")
+    applied_at   = Column(DateTime, default=datetime.utcnow)
+    is_active    = Column(Boolean, default=True)
 
 
 def create_tables():

@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Search, RefreshCw, Clock, Zap } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Search, RefreshCw, Clock, Zap, LogOut, User, Shield } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
-export default function Header({ search, onSearch, stats, onTriggerScrape }) {
+export default function Header({ search, onSearch, stats, onTriggerScrape, user, onLogout }) {
   const [triggering, setTriggering] = useState(false)
 
   const handleTrigger = async () => {
@@ -22,7 +23,6 @@ export default function Header({ search, onSearch, stats, onTriggerScrape }) {
   return (
     <header className="header-glow sticky top-0 z-50">
       <div className="max-w-screen-2xl mx-auto px-4 py-3">
-        {/* Top row */}
         <div className="flex items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-3 min-w-fit">
@@ -61,9 +61,9 @@ export default function Header({ search, onSearch, stats, onTriggerScrape }) {
             />
           </div>
 
-          {/* Scraper controls */}
-          <div className="flex items-center gap-3 ml-auto">
-            {/* Status pill */}
+          {/* Right controls */}
+          <div className="flex items-center gap-2 ml-auto">
+            {/* Scraper status */}
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border
               ${stats?.is_scraping
                 ? 'bg-blue-500/10 border-blue-500/40 text-blue-300 scraping-active'
@@ -72,19 +72,16 @@ export default function Header({ search, onSearch, stats, onTriggerScrape }) {
               {stats?.is_scraping ? 'Scraping…' : 'Idle'}
             </div>
 
-            {/* Last run info */}
             <div className="hidden lg:flex items-center gap-1 text-xs text-slate-500">
               <Clock size={11} />
               <span>{lastScraped}</span>
             </div>
 
-            {/* Next run info */}
             <div className="hidden xl:flex items-center gap-1 text-xs text-slate-500">
               <Zap size={11} />
               <span>next {nextScrape}</span>
             </div>
 
-            {/* Trigger button */}
             <button
               onClick={handleTrigger}
               disabled={stats?.is_scraping || triggering}
@@ -93,6 +90,30 @@ export default function Header({ search, onSearch, stats, onTriggerScrape }) {
               <RefreshCw size={13} className={stats?.is_scraping ? 'animate-spin' : ''} />
               Scrape Now
             </button>
+
+            {/* Admin link (admin users only) */}
+            {user?.is_admin && (
+              <Link to="/admin" className="btn-ghost text-xs px-3 py-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
+                <Shield size={13} /> Admin
+              </Link>
+            )}
+
+            {/* User info + logout */}
+            {user && (
+              <div className="flex items-center gap-1.5 pl-2 border-l border-slate-700">
+                <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 bg-slate-800/50 rounded-lg border border-slate-700/50 text-xs text-slate-300">
+                  <User size={11} className="text-indigo-400" />
+                  {user.username}
+                </div>
+                <button
+                  onClick={onLogout}
+                  className="btn-ghost text-xs px-2 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                  title="Logout"
+                >
+                  <LogOut size={13} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

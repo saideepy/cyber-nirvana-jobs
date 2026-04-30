@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { MapPin, DollarSign, ExternalLink, Building2, Clock, Calendar, CheckCircle2, Send } from 'lucide-react'
+import { MapPin, DollarSign, ExternalLink, Building2, Calendar, CheckCircle2, Send } from 'lucide-react'
 import { formatDistanceToNow, parseISO, format } from 'date-fns'
 
 const CATEGORY_COLORS = {
@@ -44,38 +43,14 @@ function fmtDate(iso) {
   catch { return iso.slice(0, 10) }
 }
 
-function fmtRelative(iso) {
-  if (!iso) return null
-  try { return formatDistanceToNow(parseISO(iso), { addSuffix: true }) }
-  catch { return null }
-}
-
-function isApplied(id) {
-  try {
-    return JSON.parse(localStorage.getItem('appliedJobs') || '[]').includes(id)
-  } catch { return false }
-}
-
-function toggleApplied(id) {
-  try {
-    const saved = JSON.parse(localStorage.getItem('appliedJobs') || '[]')
-    const updated = saved.includes(id) ? saved.filter(x => x !== id) : [...saved, id]
-    localStorage.setItem('appliedJobs', JSON.stringify(updated))
-    return updated.includes(id)
-  } catch { return false }
-}
-
-export default function JobCard({ job }) {
-  const [applied, setApplied] = useState(() => isApplied(job.id))
-
+export default function JobCard({ job, applied, onToggleApply }) {
   const catColor  = CATEGORY_COLORS[job.role_category] ?? 'bg-slate-500/20 text-slate-300 border-slate-500/40'
   const srcColor  = SOURCE_COLORS[job.source] ?? 'bg-slate-500/10 text-slate-400'
   const scoreWide = Math.round((job.semantic_score ?? 0) * 100)
 
   const handleApply = () => {
-    const next = toggleApplied(job.id)
-    setApplied(next)
-    if (next) window.open(job.url, '_blank', 'noopener,noreferrer')
+    if (!applied) window.open(job.url, '_blank', 'noopener,noreferrer')
+    onToggleApply(job, applied)
   }
 
   return (
@@ -92,53 +67,39 @@ export default function JobCard({ job }) {
 
       {/* Title */}
       <div>
-        <a
-          href={job.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group inline-flex items-start gap-1.5"
-        >
+        <a href={job.url} target="_blank" rel="noopener noreferrer" className="group inline-flex items-start gap-1.5">
           <h3 className="text-sm font-semibold text-slate-100 group-hover:text-blue-300 transition-colors leading-snug">
             {job.title || 'Untitled position'}
           </h3>
           <ExternalLink size={11} className="text-slate-500 group-hover:text-blue-400 shrink-0 mt-1 transition-colors" />
         </a>
-
         {job.company && (
           <div className="flex items-center gap-1 mt-0.5 text-xs text-slate-400">
             <Building2 size={11} className="shrink-0" />
             <span className="truncate">{job.company}</span>
             {job.is_vendor && (
-              <span className="badge bg-violet-500/15 text-violet-400 border border-violet-500/30 text-[9px] ml-1">
-                Staffing
-              </span>
+              <span className="badge bg-violet-500/15 text-violet-400 border border-violet-500/30 text-[9px] ml-1">Staffing</span>
             )}
           </div>
         )}
       </div>
 
-      {/* Meta row: location + salary */}
+      {/* Meta row */}
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
         {job.location && (
-          <span className="flex items-center gap-1">
-            <MapPin size={11} className="shrink-0" />
-            {job.location}
-          </span>
+          <span className="flex items-center gap-1"><MapPin size={11} className="shrink-0" />{job.location}</span>
         )}
         {job.salary && (
           <span className="flex items-center gap-1 text-emerald-400 font-medium">
-            <DollarSign size={11} className="shrink-0" />
-            {job.salary}
+            <span className="shrink-0">$</span>{job.salary}
           </span>
         )}
       </div>
 
-      {/* Badges row */}
+      {/* Badges */}
       <div className="flex flex-wrap gap-1.5">
         {job.is_c2c && (
-          <span className="badge bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px]">
-            C2C / 1099
-          </span>
+          <span className="badge bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px]">C2C / 1099</span>
         )}
         {scoreWide > 0 && (
           <span className="badge bg-slate-700/50 text-slate-400 border border-slate-600/40 text-[10px] font-mono">
@@ -147,20 +108,19 @@ export default function JobCard({ job }) {
         )}
       </div>
 
-      {/* Semantic score bar */}
+      {/* Score bar */}
       {scoreWide > 0 && (
         <div className="w-full bg-slate-700/30 rounded-full h-[3px]">
           <div className="score-bar h-full rounded-full" style={{ width: `${Math.min(scoreWide, 100)}%` }} />
         </div>
       )}
 
-      {/* Footer: date + apply button */}
+      {/* Footer */}
       <div className="flex items-center justify-between pt-1 border-t border-slate-700/40 gap-2">
         <span className="flex items-center gap-1 text-[10px] text-slate-600">
           <Calendar size={10} />
           {job.posted_date ? `Posted ${fmtDate(job.posted_date)}` : 'Date unknown'}
         </span>
-
         <button
           onClick={handleApply}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all shrink-0

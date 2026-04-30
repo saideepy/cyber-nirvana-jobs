@@ -3,18 +3,25 @@ C2C AI Job Board — FastAPI backend
 • Runs hourly scraping via APScheduler
 • Stores jobs in SQLite with scraped_at + posted_date timestamps
 • Serves REST API consumed by the React frontend
+• Auth: session-token based (Bearer), admin-managed users
 """
 import os
+import uuid
 import threading
 from datetime import datetime, timedelta, date
 from typing import Optional
 
-from fastapi import FastAPI, Depends, Query, BackgroundTasks
+from fastapi import FastAPI, Depends, Query, BackgroundTasks, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from passlib.context import CryptContext
 
-from database import Job, SessionLocal, create_tables
+from database import (
+    Job, User, UserSession, JobApplication,
+    SessionLocal, create_tables
+)
 from scrapers import run_all_scrapers
 from semantic import semantic_score, SEMANTIC_THRESHOLD, AI_RELATED_LABEL
 from utils import match_role, is_c2c, is_vendor, extract_pay, _is_recent, _fmt_date, _refresh_cutoff, MAX_AGE_DAYS
@@ -36,6 +43,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 # ── global scrape state ───────────────────────────────────────────────────────
 _state = {
     "is_scraping":  False,
@@ -47,6 +56,96 @@ _state = {
 
 if HAS_SCHEDULER:
     _scheduler = BackgroundScheduler(timezone="UTC")
+
+
+# ── password helpers ──────────────────────────────────────────────────────────
+
+def hash_password(password: str) -> str:
+    return pwd_ctx.hash(password)
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_ctx.verify(plain, hashed)
+
+
+# ── auth dependency ───────────────────────────────────────────────────────────
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+) -> User:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = authorization.split(" ", 1)[1]
+    session = db.query(UserSession).filter(
+        UserSession.token == token,
+        UserSession.is_active == True,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    user = db.query(User).filter(User.id == session.user_id, User.is_active == True).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found or deactivated")
+    session.last_seen = datetime.utcnow()
+    db.commit()
+    return user
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+# ── pydantic schemas ──────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    is_admin: bool = False
+
+class UpdateUserRequest(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_admin: Optional[bool] = None
+
+class ApplyRequest(BaseModel):
+    job_title: str = ""
+    job_category: str = ""
+    job_url: str = ""
+
+
+# ── seed admin ────────────────────────────────────────────────────────────────
+
+def seed_admin(db: Session):
+    admin_username = os.environ.get("ADMIN_USERNAME", "admin")
+    admin_password = os.environ.get("ADMIN_PASSWORD", "CyberNirvana@2024!")
+    existing = db.query(User).filter(User.username == admin_username).first()
+    if not existing:
+        admin = User(
+            username=admin_username,
+            password_hash=hash_password(admin_password),
+            is_admin=True,
+            is_active=True,
+        )
+        db.add(admin)
+        db.commit()
+        print(f"[Auth] Admin user '{admin_username}' created with default password.")
+    elif not existing.is_admin:
+        existing.is_admin = True
+        db.commit()
 
 
 # ── core scrape logic ─────────────────────────────────────────────────────────
@@ -63,7 +162,6 @@ def run_scrape():
 
     db = SessionLocal()
     try:
-        # Purge jobs older than MAX_AGE_DAYS so the board stays fresh
         cutoff_str = (datetime.utcnow() - timedelta(days=MAX_AGE_DAYS)).strftime("%Y-%m-%d")
         deleted = db.query(Job).filter(
             Job.posted_date != "",
@@ -74,7 +172,6 @@ def run_scrape():
             print(f"[Scraper] Purged {deleted} jobs older than {MAX_AGE_DAYS} days.")
 
         existing_urls = {row.url for row in db.query(Job.url).all()}
-        # Title+company combo dedup — catches same job posted on multiple boards
         existing_combos = {
             (r.title.lower().strip(), r.company.lower().strip())
             for r in db.query(Job.title, Job.company).all()
@@ -159,6 +256,12 @@ def run_scrape():
 def startup():
     create_tables()
 
+    db = SessionLocal()
+    try:
+        seed_admin(db)
+    finally:
+        db.close()
+
     if HAS_SCHEDULER:
         _scheduler.add_job(
             run_scrape,
@@ -172,7 +275,6 @@ def startup():
         if job and job.next_run_time:
             _state["next_scrape"] = job.next_run_time.isoformat()
 
-    # Initial scrape in background so startup doesn't block
     t = threading.Thread(target=run_scrape, daemon=True)
     t.start()
 
@@ -181,16 +283,6 @@ def startup():
 def shutdown():
     if HAS_SCHEDULER:
         _scheduler.shutdown(wait=False)
-
-
-# ── dependency ────────────────────────────────────────────────────────────────
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -214,11 +306,286 @@ def job_to_dict(j: Job) -> dict:
     }
 
 
-# ── endpoints ─────────────────────────────────────────────────────────────────
+def user_to_dict(u: User) -> dict:
+    return {
+        "id":         u.id,
+        "username":   u.username,
+        "is_admin":   u.is_admin,
+        "is_active":  u.is_active,
+        "created_at": u.created_at.isoformat() + "Z" if u.created_at else None,
+    }
+
+
+# ── auth endpoints ────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/login")
+def login(body: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == body.username).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    token = str(uuid.uuid4())
+    session = UserSession(
+        user_id    = user.id,
+        token      = token,
+        created_at = datetime.utcnow(),
+        last_seen  = datetime.utcnow(),
+        is_active  = True,
+    )
+    db.add(session)
+    db.commit()
+
+    return {
+        "token": token,
+        "user":  user_to_dict(user),
+    }
+
+
+@app.post("/api/auth/logout")
+def logout(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    if not authorization or not authorization.startswith("Bearer "):
+        return {"message": "ok"}
+    token = authorization.split(" ", 1)[1]
+    session = db.query(UserSession).filter(UserSession.token == token).first()
+    if session:
+        session.is_active     = False
+        session.logged_out_at = datetime.utcnow()
+        db.commit()
+    return {"message": "Logged out"}
+
+
+@app.get("/api/auth/me")
+def me(current_user: User = Depends(get_current_user)):
+    return user_to_dict(current_user)
+
+
+# ── job application endpoints ─────────────────────────────────────────────────
+
+@app.post("/api/jobs/{job_id}/apply")
+def apply_job(
+    job_id: int,
+    body: ApplyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    existing = db.query(JobApplication).filter(
+        JobApplication.user_id  == current_user.id,
+        JobApplication.job_id   == job_id,
+        JobApplication.is_active == True,
+    ).first()
+    if existing:
+        return {"message": "Already applied", "applied": True}
+
+    app_record = JobApplication(
+        user_id      = current_user.id,
+        job_id       = job_id,
+        job_title    = body.job_title,
+        job_category = body.job_category,
+        job_url      = body.job_url,
+        applied_at   = datetime.utcnow(),
+        is_active    = True,
+    )
+    db.add(app_record)
+    db.commit()
+    return {"message": "Applied", "applied": True}
+
+
+@app.delete("/api/jobs/{job_id}/apply")
+def unapply_job(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    record = db.query(JobApplication).filter(
+        JobApplication.user_id  == current_user.id,
+        JobApplication.job_id   == job_id,
+        JobApplication.is_active == True,
+    ).first()
+    if record:
+        record.is_active = False
+        db.commit()
+    return {"message": "Unapplied", "applied": False}
+
+
+@app.get("/api/user/applications")
+def get_my_applications(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    apps = db.query(JobApplication).filter(
+        JobApplication.user_id  == current_user.id,
+        JobApplication.is_active == True,
+    ).all()
+    return {
+        "applied_job_ids": [a.job_id for a in apps],
+        "applications": [
+            {
+                "job_id":      a.job_id,
+                "job_title":   a.job_title,
+                "job_category":a.job_category,
+                "job_url":     a.job_url,
+                "applied_at":  a.applied_at.isoformat() + "Z",
+            }
+            for a in apps
+        ],
+    }
+
+
+# ── admin endpoints ───────────────────────────────────────────────────────────
+
+ONLINE_THRESHOLD = timedelta(minutes=5)
+TODAY_START = lambda: datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+@app.get("/api/admin/dashboard")
+def admin_dashboard(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    total_users  = db.query(User).filter(User.is_admin == False).count()
+    active_users = db.query(User).filter(User.is_admin == False, User.is_active == True).count()
+    online_cutoff = datetime.utcnow() - ONLINE_THRESHOLD
+    online_now = db.query(UserSession).filter(
+        UserSession.is_active == True,
+        UserSession.last_seen >= online_cutoff,
+    ).count()
+    apps_today = db.query(JobApplication).filter(
+        JobApplication.applied_at >= TODAY_START(),
+        JobApplication.is_active  == True,
+    ).count()
+
+    return {
+        "total_users":  total_users,
+        "active_users": active_users,
+        "online_now":   online_now,
+        "apps_today":   apps_today,
+    }
+
+
+@app.get("/api/admin/users")
+def admin_list_users(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    users = db.query(User).filter(User.is_admin == False).order_by(User.created_at.desc()).all()
+    online_cutoff = datetime.utcnow() - ONLINE_THRESHOLD
+    today_start   = TODAY_START()
+    result = []
+
+    for u in users:
+        latest_session = (
+            db.query(UserSession)
+            .filter(UserSession.user_id == u.id)
+            .order_by(UserSession.created_at.desc())
+            .first()
+        )
+        is_online = (
+            latest_session is not None
+            and latest_session.is_active
+            and latest_session.last_seen >= online_cutoff
+        )
+        apps_today = db.query(JobApplication).filter(
+            JobApplication.user_id  == u.id,
+            JobApplication.applied_at >= today_start,
+            JobApplication.is_active  == True,
+        ).all()
+
+        categories_today = list({a.job_category for a in apps_today if a.job_category})
+
+        result.append({
+            **user_to_dict(u),
+            "is_online":        is_online,
+            "last_login":       latest_session.created_at.isoformat() + "Z" if latest_session else None,
+            "last_seen":        latest_session.last_seen.isoformat() + "Z" if latest_session else None,
+            "apps_today_count": len(apps_today),
+            "categories_today": categories_today,
+        })
+
+    return result
+
+
+@app.post("/api/admin/users")
+def admin_create_user(
+    body: CreateUserRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if db.query(User).filter(User.username == body.username).first():
+        raise HTTPException(status_code=400, detail="Username already exists")
+    if len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    user = User(
+        username      = body.username,
+        password_hash = hash_password(body.password),
+        is_admin      = body.is_admin,
+        is_active     = True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user_to_dict(user)
+
+
+@app.put("/api/admin/users/{user_id}")
+def admin_update_user(
+    user_id: int,
+    body: UpdateUserRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if body.username is not None:
+        existing = db.query(User).filter(User.username == body.username, User.id != user_id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        user.username = body.username
+    if body.password is not None:
+        if len(body.password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        user.password_hash = hash_password(body.password)
+    if body.is_active is not None:
+        user.is_active = body.is_active
+        if not body.is_active:
+            db.query(UserSession).filter(
+                UserSession.user_id == user_id,
+                UserSession.is_active == True,
+            ).update({"is_active": False, "logged_out_at": datetime.utcnow()})
+    if body.is_admin is not None:
+        user.is_admin = body.is_admin
+    db.commit()
+    db.refresh(user)
+    return user_to_dict(user)
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.query(UserSession).filter(UserSession.user_id == user_id).delete()
+    db.query(JobApplication).filter(JobApplication.user_id == user_id).delete()
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted"}
+
+
+# ── job endpoints (require auth) ──────────────────────────────────────────────
 
 @app.get("/api/jobs")
 def list_jobs(
     db:          Session = Depends(get_db),
+    _:           User    = Depends(get_current_user),
     page:        int     = Query(1, ge=1),
     per_page:    int     = Query(50, ge=1, le=200),
     search:      Optional[str] = None,
@@ -272,7 +639,10 @@ def list_jobs(
 
 
 @app.get("/api/stats")
-def get_stats(db: Session = Depends(get_db)):
+def get_stats(
+    db: Session = Depends(get_db),
+    _:  User    = Depends(get_current_user),
+):
     total  = db.query(Job).count()
     today  = db.query(Job).filter(
         Job.scraped_at >= datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -305,7 +675,10 @@ def get_stats(db: Session = Depends(get_db)):
 
 
 @app.post("/api/scrape/trigger")
-def trigger_scrape(background_tasks: BackgroundTasks):
+def trigger_scrape(
+    background_tasks: BackgroundTasks,
+    _: User = Depends(get_current_user),
+):
     if _state["is_scraping"]:
         return {"message": "Scrape already running", "status": "busy"}
     background_tasks.add_task(run_scrape)
@@ -313,13 +686,16 @@ def trigger_scrape(background_tasks: BackgroundTasks):
 
 
 @app.get("/api/scrape/status")
-def scrape_status():
+def scrape_status(_: User = Depends(get_current_user)):
     return _state
 
 
 @app.delete("/api/jobs/old")
-def purge_old_jobs(db: Session = Depends(get_db), older_than_days: int = 30):
-    """Remove jobs older than N days to keep the DB lean."""
+def purge_old_jobs(
+    db: Session = Depends(get_db),
+    _:  User    = Depends(require_admin),
+    older_than_days: int = 30,
+):
     cutoff = datetime.utcnow() - timedelta(days=older_than_days)
     deleted = db.query(Job).filter(Job.scraped_at < cutoff).delete()
     db.commit()
