@@ -709,11 +709,17 @@ def purge_old_jobs(
     return {"deleted": deleted}
 
 
-# Serve React frontend for all non-API routes (production)
+# Serve React frontend — mount assets dir for hashed JS/CSS, catch-all for SPA routes
 _dist = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
 if os.path.isdir(_dist):
     from fastapi.staticfiles import StaticFiles
-    app.mount("/", StaticFiles(directory=_dist, html=True), name="static")
+    from fastapi.responses import FileResponse as _FileResponse
+
+    app.mount("/assets", StaticFiles(directory=os.path.join(_dist, "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        return _FileResponse(os.path.join(_dist, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn
