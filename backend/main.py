@@ -580,6 +580,13 @@ def admin_delete_user(
     return {"message": "User deleted"}
 
 
+# ── public health endpoint (no auth — used by Railway healthcheck) ───────────
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
 # ── job endpoints (require auth) ──────────────────────────────────────────────
 
 @app.get("/api/jobs")
