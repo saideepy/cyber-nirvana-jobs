@@ -22,7 +22,7 @@ from database import (
     Job, User, UserSession, JobApplication,
     SessionLocal, create_tables
 )
-from scrapers import run_all_scrapers
+from scrapers import run_all_scrapers, scrape_dice_api, scrape_arbeitnow
 from semantic import semantic_score, SEMANTIC_THRESHOLD, AI_RELATED_LABEL
 from utils import match_role, is_c2c, is_vendor, extract_pay, _is_recent, _fmt_date, _refresh_cutoff, MAX_AGE_DAYS
 
@@ -53,6 +53,8 @@ _state = {
     "next_scrape":  None,
     "errors":       [],
 }
+
+_dice_rt_running = False   # separate lock for Dice real-time scrape
 
 if HAS_SCHEDULER:
     _scheduler = BackgroundScheduler(timezone="UTC")
@@ -250,6 +252,89 @@ def run_scrape():
                 _state["next_scrape"] = job.next_run_time.isoformat()
 
 
+# ── Dice real-time scrape (runs every 15 minutes) ─────────────────────────────
+
+def run_dice_realtime():
+    """Scrapes Dice every 15 min using their JSON API with postedDate=ONE."""
+    global _dice_rt_running
+    if _dice_rt_running or _state["is_scraping"]:
+        return
+
+    _dice_rt_running = True
+    try:
+        db = SessionLocal()
+        try:
+            existing_urls = {row.url for row in db.query(Job.url).all()}
+            existing_combos = {
+                (r.title.lower().strip(), r.company.lower().strip())
+                for r in db.query(Job.title, Job.company).all()
+            }
+            seen: set[str] = set()
+            added = 0
+
+            def _quick_sources():
+                # Arbeitnow: free, no key, refreshes frequently
+                yield from scrape_arbeitnow()
+                # Dice JSON API: try it (fails gracefully if endpoint is down)
+                yield from scrape_dice_api(posted_date="ONE")
+
+            for raw in _quick_sources():
+                url = raw.get("url", "").strip()
+                if not url or url in seen or url in existing_urls:
+                    continue
+                seen.add(url)
+
+                combo = (raw.get("title", "").lower().strip(), raw.get("company", "").lower().strip())
+                if combo[0] and combo in existing_combos:
+                    continue
+                existing_combos.add(combo)
+
+                posted_raw = raw.get("posted_raw", raw.get("posted", ""))
+                if posted_raw and not _is_recent(posted_raw):
+                    continue
+
+                title = raw.get("title", "").strip()
+                desc  = raw.get("desc",  "").strip()
+
+                category = match_role(title, desc)
+                score    = semantic_score(title, desc)
+
+                if category is None and score < SEMANTIC_THRESHOLD:
+                    continue
+                if category is None:
+                    category = AI_RELATED_LABEL
+
+                salary = raw.get("salary", "") or extract_pay(desc)
+
+                db.add(Job(
+                    url            = url,
+                    title          = title,
+                    company        = raw.get("company", ""),
+                    location       = raw.get("location", ""),
+                    salary         = salary,
+                    posted_date    = _fmt_date(posted_raw),
+                    scraped_at     = datetime.utcnow(),
+                    source         = "Dice.com",
+                    role_category  = category,
+                    description    = desc[:3000],
+                    is_c2c         = is_c2c(desc + " " + title),
+                    is_vendor      = is_vendor(raw.get("company", "")),
+                    semantic_score = round(score, 4),
+                ))
+                existing_urls.add(url)
+                added += 1
+
+            db.commit()
+            if added > 0:
+                print(f"[Dice RT] {added} new jobs added.")
+        except Exception as e:
+            print(f"[Dice RT] Error: {e}")
+        finally:
+            db.close()
+    finally:
+        _dice_rt_running = False
+
+
 # ── startup / shutdown ────────────────────────────────────────────────────────
 
 @app.on_event("startup")
@@ -269,6 +354,13 @@ def startup():
             id="scraper",
             replace_existing=True,
             misfire_grace_time=300,
+        )
+        _scheduler.add_job(
+            run_dice_realtime,
+            trigger=IntervalTrigger(minutes=15),
+            id="dice_realtime",
+            replace_existing=True,
+            misfire_grace_time=60,
         )
         _scheduler.start()
         job = _scheduler.get_job("scraper")

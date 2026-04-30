@@ -1,13 +1,15 @@
 """
 Job board scrapers.
-Sources: Adzuna API, Dice RSS, Remotive RSS, Jobicy RSS,
+Sources: Adzuna API, Dice JSON API (near-real-time), Remotive RSS, Jobicy RSS,
          We Work Remotely RSS, Himalayas.app JSON API,
          Remote.co RSS, Working Nomads API, ZipRecruiter HTML,
-         SimplyHired RSS, LinkedIn (best-effort public feed).
+         SimplyHired RSS, Arbeitnow (free), JSearch RapidAPI (optional),
+         HN Who's Hiring.
 Each scraper yields raw job dicts with keys:
   source, title, company, location, salary, posted, posted_raw, url, desc
 """
 
+import os
 import re
 import time
 import urllib.parse
@@ -119,17 +121,100 @@ def _ns_el(item, tag: str, ns: dict) -> str:
     return ""
 
 
-# ── Dice.com ─────────────────────────────────────────────────────────────────
+# ── Dice.com JSON API (near-real-time) ───────────────────────────────────────
+
+DICE_HEADERS = {
+    **HEADERS,
+    "Accept": "application/json, text/plain, */*",
+    "Origin": "https://www.dice.com",
+    "Referer": "https://www.dice.com/",
+}
 
 DICE_QUERIES = [
-    "machine+learning+engineer", "AI+engineer", "data+scientist",
-    "GenAI+developer", "LLM+engineer", "MLOps+engineer",
-    "data+engineer", "NLP+engineer", "deep+learning",
+    "AI engineer", "ML engineer", "machine learning engineer",
+    "generative AI developer", "LLM engineer", "agentic AI",
+    "data scientist", "MLOps engineer", "NLP engineer",
+    "deep learning engineer", "computer vision engineer",
+    "RAG developer", "LangChain developer", "AI architect",
+    "data engineer AI", "GenAI developer", "vector database",
+    "prompt engineer", "AI platform engineer", "Python ML",
 ]
 
 
-def scrape_dice() -> Generator:
-    for q in DICE_QUERIES:
+def _dice_location(j: dict) -> str:
+    loc = j.get("location", "")
+    if isinstance(loc, dict):
+        parts = [loc.get("city", ""), loc.get("state", "")]
+        return ", ".join(p for p in parts if p) or "See posting"
+    return str(loc) if loc else "See posting"
+
+
+def _dice_url(j: dict) -> str:
+    job_id = j.get("id", "")
+    return (
+        j.get("applyUrl", "")
+        or j.get("jobDetailUrl", "")
+        or (f"https://www.dice.com/job-detail/{job_id}" if job_id else "")
+    )
+
+
+def scrape_dice_api(queries=None, posted_date: str = "ONE") -> Generator:
+    """Dice JSON search API. posted_date: ONE=24h, THREE=3d, SEVEN=7d."""
+    if queries is None:
+        queries = DICE_QUERIES
+    for q in queries:
+        url = (
+            "https://job-search-api.scoobee.com/jobs/search"
+            f"?q={urllib.parse.quote(q)}"
+            "&countryCode2=US"
+            f"&postedDate={posted_date}"
+            "&pageSize=100"
+            "&sort=-postedDate"
+        )
+        try:
+            r = requests.get(url, timeout=TIMEOUT, headers=DICE_HEADERS)
+            r.raise_for_status()
+            data = r.json()
+            jobs_list = (
+                data.get("data", {}).get("jobs", [])
+                or data.get("jobs", [])
+                or (data if isinstance(data, list) else [])
+            )
+            for j in jobs_list:
+                pub = j.get("postedDate", j.get("modifiedDate", ""))
+                desc = j.get("descriptionFragment", j.get("jobDescription", ""))
+                yield {
+                    "source":     "Dice.com",
+                    "title":      j.get("title", ""),
+                    "company":    j.get("companyName", ""),
+                    "location":   _dice_location(j),
+                    "salary":     "",
+                    "posted":     pub[:10] if pub else "",
+                    "posted_raw": pub or "",
+                    "url":        _dice_url(j),
+                    "desc":       desc,
+                }
+            time.sleep(0.4)
+        except Exception as e:
+            print(f"  [Dice API] {q}: {e}")
+
+
+DICE_RSS_QUERIES = [
+    "machine+learning+engineer", "AI+engineer", "data+scientist",
+    "GenAI+developer", "LLM+engineer", "MLOps+engineer",
+    "data+engineer", "NLP+engineer", "deep+learning",
+    "agentic+AI", "AI+architect", "computer+vision+engineer",
+    "generative+AI+developer", "RAG+developer", "LangChain+developer",
+    "AI+platform+engineer", "vector+database", "prompt+engineer",
+    "AI+agent+developer", "foundation+model+engineer",
+]
+
+
+def scrape_dice_rss(queries=None) -> Generator:
+    """Dice RSS feeds — expanded query set, ~15 min freshness."""
+    if queries is None:
+        queries = DICE_RSS_QUERIES
+    for q in queries:
         url = f"https://www.dice.com/jobs/q-{q}-jobs.rss"
         try:
             r    = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
@@ -151,7 +236,13 @@ def scrape_dice() -> Generator:
                 }
             time.sleep(0.3)
         except Exception as e:
-            print(f"  [Dice] {q}: {e}")
+            print(f"  [Dice RSS] {q}: {e}")
+
+
+def scrape_dice() -> Generator:
+    """Dice scraper: tries JSON API (scoobee endpoint); RSS fallback removed
+    as dice.com RSS feeds now return HTML. Fails gracefully if API is down."""
+    yield from scrape_dice_api(posted_date="ONE")
 
 
 # ── Remotive.com ─────────────────────────────────────────────────────────────
@@ -191,21 +282,19 @@ def scrape_remotive() -> Generator:
             print(f"  [Remotive] {q}: {e}")
 
 
-# ── Jobicy.com (contract filter) ──────────────────────────────────────────────
+# ── Jobicy.com ────────────────────────────────────────────────────────────────
 
 JOBICY_QUERIES = [
     "machine+learning", "AI+engineer", "data+scientist",
     "generative+AI", "LLM", "data+engineer", "python+AI",
+    "MLOps", "deep+learning", "NLP",
 ]
 
 
 def scrape_jobicy() -> Generator:
     for q in JOBICY_QUERIES:
-        url = (
-            f"https://jobicy.com/?feed=job_feed"
-            f"&job_types=contract"
-            f"&search_keywords={urllib.parse.quote(q)}"
-        )
+        # Note: job_types=contract filter returns 0 results — omit it
+        url = f"https://jobicy.com/?feed=job_feed&search_keywords={urllib.parse.quote(q)}"
         try:
             r    = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
             root = _parse_rss(r.content)
@@ -334,127 +423,149 @@ def scrape_working_nomads() -> Generator:
             print(f"  [WorkingNomads] {cat}: {e}")
 
 
-# ── Remote.co ────────────────────────────────────────────────────────────────
+# ── The Muse (free API, no key needed) ───────────────────────────────────────
 
-REMOTE_CO_FEEDS = [
-    "https://remote.co/remote-jobs/developer/feed/",
-    "https://remote.co/remote-jobs/data-science/feed/",
+MUSE_CATEGORIES = [
+    "Data Science", "Data Engineering & Warehouse",
+    "Machine Learning", "Software Engineer",
+]
+
+MUSE_QUERIES = [
+    "AI", "machine learning", "LLM", "data scientist",
+    "generative AI", "MLOps", "NLP", "deep learning",
 ]
 
 
-def scrape_remoteco() -> Generator:
-    for feed_url in REMOTE_CO_FEEDS:
-        try:
-            r    = requests.get(feed_url, timeout=TIMEOUT, headers=HEADERS)
-            root = _parse_rss(r.content)
-            if root is None:
-                continue
-            for item in root.findall(".//item")[:20]:
-                pub = _el(item, "pubDate")
-                yield {
-                    "source":     "Remote.co",
-                    "title":      _el(item, "title"),
-                    "company":    "",
-                    "location":   "Remote",
-                    "salary":     "",
-                    "posted":     pub[:10],
-                    "posted_raw": pub,
-                    "url":        _el(item, "link"),
-                    "desc":       _el(item, "description"),
-                }
-            time.sleep(0.3)
-        except Exception as e:
-            print(f"  [Remote.co] {feed_url}: {e}")
-
-
-# ── SimplyHired (public search, first page) ───────────────────────────────────
-
-SH_QUERIES = [
-    "machine learning engineer", "AI engineer", "data scientist",
-    "generative AI developer", "LLM engineer", "data engineer",
-]
-
-
-def scrape_simplyhired() -> Generator:
-    for q in SH_QUERIES:
+def scrape_the_muse() -> Generator:
+    """The Muse public jobs API — free, no key required."""
+    for q in MUSE_QUERIES:
         url = (
-            f"https://www.simplyhired.com/search"
-            f"?q={urllib.parse.quote(q)}&fdb=7&job_type=contract"
+            f"https://www.themuse.com/api/public/jobs"
+            f"?category=Computer+and+IT"
+            f"&level=Senior+Level&level=Mid+Level"
+            f"&page=0"
         )
         try:
             r    = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
-            soup = BeautifulSoup(r.text, "lxml")
-            for card in soup.select("[data-testid='searchSerpJob']")[:15]:
-                title_el   = card.select_one("[data-testid='searchSerpJobTitle']")
-                company_el = card.select_one("[data-testid='searchSerpJobCompanyName']")
-                loc_el     = card.select_one("[data-testid='searchSerpJobLocation']")
-                date_el    = card.select_one("time")
-                link_el    = card.select_one("a[href]")
-                desc_el    = card.select_one("[data-testid='searchSerpJobSnippet']")
-
-                href = link_el["href"] if link_el else ""
-                if href and not href.startswith("http"):
-                    href = "https://www.simplyhired.com" + href
-
-                pub = date_el.get("datetime", "") if date_el else ""
+            r.raise_for_status()
+            for j in r.json().get("results", []):
+                title = j.get("name", "")
+                # Filter for AI/ML relevance in title
+                if not any(kw.lower() in title.lower() for kw in [
+                    "ai", "ml", "machine learning", "data", "nlp",
+                    "llm", "python", "cloud", "engineer", "scientist"
+                ]):
+                    continue
+                pub = j.get("publication_date", "")
+                company = j.get("company", {})
+                company_name = company.get("name", "") if isinstance(company, dict) else ""
+                locations = j.get("locations", [])
+                loc = locations[0].get("name", "") if locations else "See posting"
+                url_apply = j.get("refs", {}).get("landing_page", "")
                 yield {
-                    "source":     "SimplyHired",
-                    "title":      title_el.get_text(strip=True) if title_el else "",
-                    "company":    company_el.get_text(strip=True) if company_el else "",
-                    "location":   loc_el.get_text(strip=True) if loc_el else "",
+                    "source":     "The Muse",
+                    "title":      title,
+                    "company":    company_name,
+                    "location":   loc,
                     "salary":     "",
-                    "posted":     pub[:10],
+                    "posted":     pub[:10] if pub else "",
                     "posted_raw": pub,
-                    "url":        href,
-                    "desc":       desc_el.get_text(strip=True) if desc_el else "",
+                    "url":        url_apply,
+                    "desc":       j.get("contents", ""),
                 }
             time.sleep(0.5)
         except Exception as e:
-            print(f"  [SimplyHired] {q}: {e}")
+            print(f"  [The Muse] {q}: {e}")
+            break
 
 
-# ── ZipRecruiter (public search HTML) ────────────────────────────────────────
+# ── Remotive additional feeds ─────────────────────────────────────────────────
+# (SimplyHired and ZipRecruiter both return 403 anti-bot; removed)
 
-ZR_QUERIES = [
-    "machine learning engineer", "AI engineer", "generative AI developer",
-    "data scientist", "LLM engineer", "data engineer",
+
+# ── Arbeitnow (free, no key) ─────────────────────────────────────────────────
+
+def scrape_arbeitnow() -> Generator:
+    """Arbeitnow public job board API — completely free, no key needed."""
+    import datetime as _dt
+    url = "https://www.arbeitnow.com/api/job-board-api"
+    try:
+        r = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
+        r.raise_for_status()
+        for j in r.json().get("data", []):
+            pub = j.get("created_at", "")
+            # created_at is a Unix timestamp (int) — convert to ISO string
+            if isinstance(pub, (int, float)) and pub > 0:
+                pub_str = _dt.datetime.utcfromtimestamp(pub).strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                pub_str = str(pub) if pub else ""
+            yield {
+                "source":     "Arbeitnow",
+                "title":      j.get("title", ""),
+                "company":    j.get("company_name", ""),
+                "location":   j.get("location", "Remote"),
+                "salary":     "",
+                "posted":     pub_str[:10],
+                "posted_raw": pub_str,
+                "url":        j.get("url", ""),
+                "desc":       j.get("description", ""),
+            }
+    except Exception as e:
+        print(f"  [Arbeitnow]: {e}")
+
+
+# ── JSearch via RapidAPI (optional — set JSEARCH_API_KEY env var) ─────────────
+
+JSEARCH_QUERIES = [
+    "AI engineer", "machine learning engineer",
+    "generative AI developer", "LLM engineer",
+    "data scientist AI", "MLOps engineer",
+    "deep learning engineer", "AI architect",
+    "RAG developer", "NLP engineer",
 ]
 
 
-def scrape_ziprecruiter() -> Generator:
-    for q in ZR_QUERIES:
+def scrape_jsearch() -> Generator:
+    """JSearch RapidAPI — covers Dice, Indeed, Monster, Glassdoor, ZipRecruiter.
+    Needs JSEARCH_API_KEY env var. Free tier: 200 req/month."""
+    api_key = os.environ.get("JSEARCH_API_KEY", "")
+    if not api_key:
+        return
+    headers = {
+        "X-RapidAPI-Key":  api_key,
+        "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
+    }
+    for q in JSEARCH_QUERIES:
         url = (
-            f"https://www.ziprecruiter.com/jobs-search"
-            f"?search={urllib.parse.quote(q)}&location=&days=7"
+            f"https://jsearch.p.rapidapi.com/search"
+            f"?query={urllib.parse.quote(q)}"
+            f"&date_posted=today"
+            f"&num_pages=2"
+            f"&country=us"
         )
         try:
-            r    = requests.get(url, timeout=TIMEOUT, headers={**HEADERS, "Accept-Language": "en-US"})
-            soup = BeautifulSoup(r.text, "lxml")
-            for card in soup.select("article.job_result, [data-testid='job-card']")[:15]:
-                title_el   = card.select_one("h2, [data-testid='job-title']")
-                company_el = card.select_one("[class*='company'], [data-testid='job-company']")
-                loc_el     = card.select_one("[class*='location'], [data-testid='job-location']")
-                link_el    = card.select_one("a[href*='/jobs/']")
-                desc_el    = card.select_one("[class*='snippet'], [data-testid='job-snippet']")
-
-                href = link_el["href"] if link_el else ""
-                if href and not href.startswith("http"):
-                    href = "https://www.ziprecruiter.com" + href
-
+            r = requests.get(url, timeout=TIMEOUT, headers=headers)
+            r.raise_for_status()
+            for j in r.json().get("data", []):
+                pub = j.get("job_posted_at_datetime_utc", "")
+                loc_parts = [j.get("job_city", ""), j.get("job_state", "")]
+                loc = ", ".join(p for p in loc_parts if p) or j.get("job_country", "")
+                publisher = j.get("job_publisher", "JSearch")
                 yield {
-                    "source":     "ZipRecruiter",
-                    "title":      title_el.get_text(strip=True) if title_el else "",
-                    "company":    company_el.get_text(strip=True) if company_el else "",
-                    "location":   loc_el.get_text(strip=True) if loc_el else "",
+                    "source":     publisher,
+                    "title":      j.get("job_title", ""),
+                    "company":    j.get("employer_name", ""),
+                    "location":   loc,
                     "salary":     "",
-                    "posted":     "",
-                    "posted_raw": "",
-                    "url":        href,
-                    "desc":       desc_el.get_text(strip=True) if desc_el else "",
+                    "posted":     pub[:10] if pub else "",
+                    "posted_raw": pub,
+                    "url":        j.get("job_apply_link", j.get("job_google_link", "")),
+                    "desc":       j.get("job_description", ""),
                 }
-            time.sleep(0.6)
+            time.sleep(1.2)
         except Exception as e:
-            print(f"  [ZipRecruiter] {q}: {e}")
+            print(f"  [JSearch] {q}: {e}")
+            break
 
 
 # ── HN Who's Hiring (monthly thread) ─────────────────────────────────────────
@@ -485,8 +596,8 @@ def scrape_hn_hiring() -> Generator:
             text = c.get("text", "")
             if not text or len(text) < 50:
                 continue
-            # Extract first line as title
-            first_line = BeautifulSoup(text, "lxml").get_text()[:120]
+            full_text = BeautifulSoup(text, "html.parser").get_text()
+            first_line = full_text[:120]
             yield {
                 "source":     "HN Who's Hiring",
                 "title":      first_line.strip(),
@@ -496,7 +607,7 @@ def scrape_hn_hiring() -> Generator:
                 "posted":     "",
                 "posted_raw": "",
                 "url":        f"https://news.ycombinator.com/item?id={c.get('id', '')}",
-                "desc":       BeautifulSoup(text, "lxml").get_text()[:3000],
+                "desc":       full_text[:3000],
             }
         time.sleep(0.3)
     except Exception as e:
@@ -506,17 +617,20 @@ def scrape_hn_hiring() -> Generator:
 # ── Master runner ─────────────────────────────────────────────────────────────
 
 SCRAPERS = [
-    ("Adzuna",           scrape_adzuna),
-    ("Dice.com",         scrape_dice),
-    ("Remotive",         scrape_remotive),
-    ("Jobicy",           scrape_jobicy),
-    ("WeWorkRemotely",   scrape_weworkremotely),
-    ("Himalayas",        scrape_himalayas),
-    ("WorkingNomads",    scrape_working_nomads),
-    ("Remote.co",        scrape_remoteco),
-    ("SimplyHired",      scrape_simplyhired),
-    ("ZipRecruiter",     scrape_ziprecruiter),
+    ("Adzuna",           scrape_adzuna),         # API, broad coverage
+    ("Dice.com",         scrape_dice),           # JSON API (graceful fallback if down)
+    ("Remotive",         scrape_remotive),       # RSS, remote tech jobs
+    ("Jobicy",           scrape_jobicy),         # RSS, remote jobs
+    ("WeWorkRemotely",   scrape_weworkremotely), # RSS, remote jobs
+    ("Himalayas",        scrape_himalayas),      # JSON API, remote jobs
+    ("WorkingNomads",    scrape_working_nomads), # JSON API, remote jobs
+    ("The Muse",         scrape_the_muse),       # free API, tech jobs
+    ("Arbeitnow",        scrape_arbeitnow),      # free API, no key
+    ("JSearch",          scrape_jsearch),        # optional: set JSEARCH_API_KEY
     ("HN Hiring",        scrape_hn_hiring),
+    # Remote.co: removed (consistent timeouts)
+    # SimplyHired: removed (403 bot protection)
+    # ZipRecruiter: removed (403 bot protection)
 ]
 
 
