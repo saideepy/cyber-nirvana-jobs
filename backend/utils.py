@@ -50,6 +50,31 @@ def _fmt_date(raw: str) -> str:
 
 # ── role regex patterns ────────────────────────────────────────────────────────
 ROLE_PATTERNS = [
+    (".NET Developer", re.compile(
+        r"(?:"
+        r"(?<!\w)\.net[\s\-]?(developer|engineer|programmer|architect|specialist|full[\s\-]?stack|backend|web|application)?"
+        r"|asp\.net[\s\-]?(developer|engineer|mvc|core|web|application)?"
+        r"|\bc#[\s\-]?(developer|engineer|programmer|architect|specialist)?"
+        r"|\bdotnet[\s\-]?(developer|engineer|programmer|architect)?"
+        r")", re.IGNORECASE)),
+
+    ("React Developer", re.compile(
+        r"\b("
+        r"react[\s\-]?(developer|engineer|programmer|native|js)?"
+        r"|reactjs[\s\-]?(developer|engineer)?"
+        r"|next\.js[\s\-]?(developer|engineer|programmer)?"
+        r"|angular[\s\-]?(developer|engineer|programmer|architect)?"
+        r"|angularjs[\s\-]?(developer|engineer|programmer)?"
+        r")", re.IGNORECASE)),
+
+    ("SAP TM", re.compile(
+        r"\b("
+        r"sap[\s\-]?tm[\s\-]?(architect|consultant|functional|solution|developer|engineer)?"
+        r"|sap[\s\-]?transport[\s\-]?management"
+        r"|s[\s\-]?4[\s\-]?hana[\s\-]?(embedded[\s\-]?)?tm"
+        r"|sap[\s\-]?scm[\s\-]?(consultant|specialist|architect|advisor)?"
+        r")", re.IGNORECASE)),
+
     ("Agentic AI Engineer", re.compile(
         r"\b("
         r"agentic[\s\-]?ai"

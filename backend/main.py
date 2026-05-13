@@ -11,7 +11,14 @@ import threading
 from datetime import datetime, timedelta, date
 from typing import Optional
 
-from fastapi import FastAPI, Depends, Query, BackgroundTasks, Header, HTTPException
+# Load .env file if present (local dev — EC2 uses --env-file in docker run)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+except ImportError:
+    pass
+
+from fastapi import FastAPI, Depends, Query, BackgroundTasks, Header, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -19,10 +26,15 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
 from database import (
-    Job, User, UserSession, JobApplication,
+    Job, User, UserSession, JobApplication, LinkedInPost,
     SessionLocal, create_tables
 )
-from scrapers import run_all_scrapers, scrape_dice_api, scrape_arbeitnow
+from scrapers import (
+    run_all_scrapers, scrape_dice_api, scrape_arbeitnow, scrape_linkedin_posts,
+    scrape_jsearch, scrape_jooble, scrape_linkedin_jobs_scrapfly, scrape_indeed_scrapfly,
+    scrape_dice_scrapfly, scrape_dice_apify, scrape_linkedin_jobs_free,
+)
+import resume as resume_mod
 from semantic import semantic_score, SEMANTIC_THRESHOLD, AI_RELATED_LABEL
 from utils import match_role, is_c2c, is_vendor, extract_pay, _is_recent, _fmt_date, _refresh_cutoff, MAX_AGE_DAYS
 
@@ -55,6 +67,16 @@ _state = {
 }
 
 _dice_rt_running = False   # separate lock for Dice real-time scrape
+_li_scraping     = False   # lock for LinkedIn posts scrape
+
+_li_state = {
+    "is_scraping":  False,
+    "last_scraped": None,
+    "last_added":   0,
+    "total_posts":  0,
+    "configured":   True,   # DuckDuckGo needs no key; SerpAPI/Serper/Apify are optional upgrades
+    "apis_active":  [],     # populated at runtime from env vars
+}
 
 if HAS_SCHEDULER:
     _scheduler = BackgroundScheduler(timezone="UTC")
@@ -150,9 +172,27 @@ def seed_admin(db: Session):
         db.commit()
 
 
+# ── domain → category mapping ─────────────────────────────────────────────────
+
+DOTNET_CATEGORIES = [".NET Developer", "React Developer"]
+SAP_CATEGORIES    = ["SAP TM"]
+AIML_EXCLUDED     = DOTNET_CATEGORIES + SAP_CATEGORIES
+
+# ── active-hours gate (10 AM – 5 PM US/Eastern) ───────────────────────────────
+
+def _is_active_hours() -> bool:
+    """Return True only between 9:00 AM and 5:00 PM US/Eastern time."""
+    from zoneinfo import ZoneInfo
+    now_est = datetime.now(ZoneInfo("America/New_York"))
+    return 9 <= now_est.hour < 17
+
+
 # ── core scrape logic ─────────────────────────────────────────────────────────
 
 def run_scrape():
+    if not _is_active_hours():
+        print("[Scraper] Outside active hours (10 AM–5 PM EST) — skipping.")
+        return
     if _state["is_scraping"]:
         print("[Scraper] Already running, skipping.")
         return
@@ -257,7 +297,9 @@ def run_scrape():
 def run_dice_realtime():
     """Scrapes Dice every 15 min using their JSON API with postedDate=ONE."""
     global _dice_rt_running
-    if _dice_rt_running or _state["is_scraping"]:
+    if not _is_active_hours():
+        return
+    if _dice_rt_running:
         return
 
     _dice_rt_running = True
@@ -273,10 +315,15 @@ def run_dice_realtime():
             added = 0
 
             def _quick_sources():
-                # Arbeitnow: free, no key, refreshes frequently
-                yield from scrape_arbeitnow()
-                # Dice JSON API: try it (fails gracefully if endpoint is down)
-                yield from scrape_dice_api(posted_date="ONE")
+                # Free LinkedIn guest API — always runs, no API key needed
+                yield from scrape_linkedin_jobs_free()
+                # ScrapFly scrapers run in main run_scrape() to avoid concurrency conflicts
+                if os.environ.get("RAPIDAPI_KEY") or os.environ.get("JSEARCH_API_KEY"):
+                    yield from scrape_jsearch()
+                if os.environ.get("JOOBLE_API_KEY"):
+                    yield from scrape_jooble()
+                if os.environ.get("APIFY_TOKEN"):
+                    yield from scrape_dice_apify()
 
             for raw in _quick_sources():
                 url = raw.get("url", "").strip()
@@ -314,7 +361,7 @@ def run_dice_realtime():
                     salary         = salary,
                     posted_date    = _fmt_date(posted_raw),
                     scraped_at     = datetime.utcnow(),
-                    source         = "Dice.com",
+                    source         = raw.get("source", ""),
                     role_category  = category,
                     description    = desc[:3000],
                     is_c2c         = is_c2c(desc + " " + title),
@@ -335,6 +382,97 @@ def run_dice_realtime():
         _dice_rt_running = False
 
 
+# ── LinkedIn posts scrape (runs every 15 minutes) ────────────────────────────
+
+def run_linkedin_posts(domain: str = "AIML"):
+    """Scrape LinkedIn posts for one domain and store in linkedin_posts table."""
+    global _li_scraping
+    if not _is_active_hours():
+        return
+    if _li_scraping or _li_state["is_scraping"]:
+        return
+
+    _li_scraping             = True
+    _li_state["is_scraping"] = True
+    try:
+        posts = scrape_linkedin_posts(domain)
+        if not posts:
+            return
+
+        db = SessionLocal()
+        try:
+            existing_urls = {r.post_url for r in db.query(LinkedInPost.post_url).all()}
+
+            # Purge posts older than 24 hours — use posted_at string comparison (ISO dates sort correctly)
+            cutoff = datetime.utcnow() - timedelta(hours=24)
+            cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
+            db.query(LinkedInPost).filter(
+                LinkedInPost.posted_at != "",
+                LinkedInPost.posted_at < cutoff_str,
+            ).delete(synchronize_session=False)
+            # Backstop: also purge by scraped_at for posts with unparseable posted_at
+            db.query(LinkedInPost).filter(LinkedInPost.scraped_at < cutoff).delete(
+                synchronize_session=False
+            )
+
+            added = 0
+            for p in posts:
+                url = p.get("post_url", "").strip()
+                if not url or url in existing_urls:
+                    continue
+
+                # Skip posts older than 24 hours based on posted_at
+                raw_ts = p.get("posted_at", "")
+                try:
+                    dt = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+                    dt_utc = dt.replace(tzinfo=None) if dt.tzinfo else dt
+                    if dt_utc < cutoff:
+                        continue
+                except Exception:
+                    pass  # If we can't parse, allow it through (recently scraped)
+
+                db.add(LinkedInPost(
+                    post_url       = url,
+                    author_name    = p.get("author_name", ""),
+                    author_title   = p.get("author_title", ""),
+                    author_url     = p.get("author_url", ""),
+                    content        = p.get("content", ""),
+                    posted_at      = p.get("posted_at", ""),
+                    likes_count    = p.get("likes_count", 0),
+                    comments_count = p.get("comments_count", 0),
+                    scraped_at     = datetime.utcnow(),
+                    search_query   = p.get("search_query", ""),
+                    role_keyword   = p.get("role_keyword", ""),
+                    domain         = p.get("domain", domain),
+                ))
+                existing_urls.add(url)
+                added += 1
+
+            db.commit()
+            total = db.query(LinkedInPost).count()
+            _li_state["last_added"]   = added
+            _li_state["total_posts"]  = total
+            _li_state["last_scraped"] = datetime.utcnow().isoformat() + "Z"
+            if added > 0:
+                print(f"[LinkedIn Posts/{domain}] {added} new posts added ({total} total).")
+        except Exception as e:
+            print(f"[LinkedIn Posts/{domain}] DB error: {e}")
+        finally:
+            db.close()
+
+    except Exception as e:
+        print(f"[LinkedIn Posts/{domain}] Error: {e}")
+    finally:
+        _li_scraping             = False
+        _li_state["is_scraping"] = False
+
+
+def run_linkedin_posts_all():
+    """Scrape LinkedIn posts for all 3 domains sequentially."""
+    for domain in ["AIML", "DOTNET", "SAP"]:
+        run_linkedin_posts(domain)
+
+
 # ── startup / shutdown ────────────────────────────────────────────────────────
 
 @app.on_event("startup")
@@ -344,21 +482,36 @@ def startup():
     db = SessionLocal()
     try:
         seed_admin(db)
+
+        # Purge LinkedIn posts with posted_at older than 24 hours (catches stale 2025 data)
+        cutoff_str = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+        db.query(LinkedInPost).filter(
+            LinkedInPost.posted_at != "",
+            LinkedInPost.posted_at < cutoff_str,
+        ).delete(synchronize_session=False)
+        db.commit()
     finally:
         db.close()
 
     if HAS_SCHEDULER:
         _scheduler.add_job(
             run_scrape,
-            trigger=IntervalTrigger(hours=1),
+            trigger=IntervalTrigger(minutes=10),
             id="scraper",
             replace_existing=True,
-            misfire_grace_time=300,
+            misfire_grace_time=120,
         )
         _scheduler.add_job(
             run_dice_realtime,
-            trigger=IntervalTrigger(minutes=15),
+            trigger=IntervalTrigger(minutes=10),
             id="dice_realtime",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        _scheduler.add_job(
+            run_linkedin_posts_all,
+            trigger=IntervalTrigger(minutes=10),
+            id="linkedin_posts",
             replace_existing=True,
             misfire_grace_time=60,
         )
@@ -369,6 +522,15 @@ def startup():
 
     t = threading.Thread(target=run_scrape, daemon=True)
     t.start()
+
+    # Kick off quick sources (JSearch, ScrapFly, Jooble) immediately on startup
+    t3 = threading.Thread(target=run_dice_realtime, daemon=True)
+    t3.start()
+
+    # Kick off LinkedIn posts scrape immediately if any API key is present
+    if any(os.environ.get(k) for k in ("APIFY_TOKEN", "SERPAPI_KEY", "SERPER_API_KEY")):
+        t2 = threading.Thread(target=run_linkedin_posts_all, daemon=True)
+        t2.start()
 
 
 @app.on_event("shutdown")
@@ -683,19 +845,39 @@ def health():
 
 @app.get("/api/jobs")
 def list_jobs(
-    db:          Session = Depends(get_db),
-    _:           User    = Depends(get_current_user),
-    page:        int     = Query(1, ge=1),
-    per_page:    int     = Query(50, ge=1, le=200),
-    search:      Optional[str] = None,
-    category:    Optional[str] = None,
-    source:      Optional[str] = None,
-    c2c_only:    bool = False,
-    vendor_only: bool = False,
-    days:        Optional[int] = None,
-    sort:        str  = "newest",
+    db:           Session = Depends(get_db),
+    _:            User    = Depends(get_current_user),
+    page:         int     = Query(1, ge=1),
+    per_page:     int     = Query(50, ge=1, le=200),
+    search:       Optional[str] = None,
+    category:     Optional[str] = None,
+    source:       Optional[str] = None,
+    domain:       Optional[str] = None,
+    c2c_only:     bool = False,
+    vendor_only:  bool = False,
+    remote_only:  bool = False,
+    strict_24h:   bool = False,
+    days:         Optional[int] = None,
+    sort:         str  = "newest",
 ):
+    from sqlalchemy import or_
     q = db.query(Job)
+
+    # Domain filtering: each domain maps to specific role_category values
+    if domain == "DOTNET":
+        q = q.filter(Job.role_category.in_(DOTNET_CATEGORIES))
+    elif domain == "SAP":
+        q = q.filter(Job.role_category.in_(SAP_CATEGORIES))
+    elif domain == "AIML":
+        q = q.filter(~Job.role_category.in_(AIML_EXCLUDED))
+        # Safety net: exclude jobs whose title contains .NET/C#/dotnet keywords
+        q = q.filter(~or_(
+            Job.title.ilike("%.net%"),
+            Job.title.ilike("%c# %"),
+            Job.title.ilike("%c#/%"),
+            Job.title.ilike("%dotnet%"),
+            Job.title.ilike("%asp.net%"),
+        ))
 
     if search:
         term = f"%{search}%"
@@ -712,6 +894,23 @@ def list_jobs(
         q = q.filter(Job.is_c2c == True)
     if vendor_only:
         q = q.filter(Job.is_vendor == True)
+    if remote_only:
+        q = q.filter(or_(
+            Job.location.ilike("%remote%"),
+            Job.location.ilike("%anywhere%"),
+            Job.title.ilike("%remote%"),
+            Job.location == "",
+        ))
+    if strict_24h:
+        # Strict: only jobs with posted_date within last 24h
+        cutoff_date = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%d")
+        cutoff_dt   = datetime.utcnow() - timedelta(hours=24)
+        q = q.filter(or_(
+            # Jobs with a known posted date → use it
+            (Job.posted_date != "") & (Job.posted_date >= cutoff_date),
+            # Jobs without posted date → fall back to scraped time
+            (Job.posted_date == "") & (Job.scraped_at >= cutoff_dt),
+        ))
     if days:
         cutoff = datetime.utcnow() - timedelta(days=days)
         q = q.filter(Job.scraped_at >= cutoff)
@@ -723,7 +922,7 @@ def list_jobs(
     elif sort == "score":
         q = q.order_by(Job.semantic_score.desc())
     elif sort == "posted":
-        q = q.order_by(Job.posted_date.desc())
+        q = q.order_by(Job.posted_date.desc(), Job.scraped_at.desc())
 
     total = q.count()
     jobs  = q.offset((page - 1) * per_page).limit(per_page).all()
@@ -799,6 +998,138 @@ def purge_old_jobs(
     deleted = db.query(Job).filter(Job.scraped_at < cutoff).delete()
     db.commit()
     return {"deleted": deleted}
+
+
+# ── LinkedIn posts endpoints ──────────────────────────────────────────────────
+
+def _active_li_apis() -> list[str]:
+    active = []
+    if os.environ.get("APIFY_TOKEN"):    active.append("Apify")
+    if os.environ.get("SERPAPI_KEY"):    active.append("SerpAPI")
+    if os.environ.get("SERPER_API_KEY"): active.append("Serper.dev")
+    if not active:
+        active = ["No API key — add APIFY_TOKEN to /data/env.conf"]
+    return active
+
+def li_post_to_dict(p: LinkedInPost) -> dict:
+    return {
+        "id":             p.id,
+        "post_url":       p.post_url,
+        "author_name":    p.author_name,
+        "author_title":   p.author_title,
+        "author_url":     p.author_url,
+        "content":        p.content,
+        "posted_at":      p.posted_at,
+        "likes_count":    p.likes_count,
+        "comments_count": p.comments_count,
+        "scraped_at":     p.scraped_at.isoformat() + "Z" if p.scraped_at else None,
+        "search_query":   p.search_query,
+        "role_keyword":   p.role_keyword,
+        "domain":         getattr(p, "domain", "AIML"),
+    }
+
+
+@app.get("/api/linkedin-posts")
+def get_linkedin_posts(
+    db:       Session = Depends(get_db),
+    _:        User    = Depends(get_current_user),
+    page:     int     = Query(1, ge=1),
+    per_page: int     = Query(30, ge=1, le=100),
+    search:   Optional[str] = None,
+    role:     Optional[str] = None,
+    domain:   Optional[str] = None,
+    hours:    Optional[int] = None,   # 1, 2, 5, or None (= all within 24h)
+):
+    q = db.query(LinkedInPost).order_by(LinkedInPost.posted_at.desc())
+
+    # Always restrict to past 24 hours using posted_at (ISO strings sort correctly)
+    cutoff_24h_str = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+    q = q.filter(
+        LinkedInPost.posted_at != "",
+        LinkedInPost.posted_at >= cutoff_24h_str,
+    )
+
+    if domain:
+        q = q.filter(LinkedInPost.domain == domain)
+    if search:
+        term = f"%{search}%"
+        q = q.filter(
+            LinkedInPost.content.ilike(term) |
+            LinkedInPost.author_name.ilike(term) |
+            LinkedInPost.author_title.ilike(term)
+        )
+    if role:
+        q = q.filter(LinkedInPost.role_keyword == role)
+    if hours:
+        cutoff_h_str = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S")
+        q = q.filter(LinkedInPost.posted_at >= cutoff_h_str)
+
+    total = q.count()
+    posts = q.offset((page - 1) * per_page).limit(per_page).all()
+
+    _li_state["total_posts"] = db.query(LinkedInPost).count()
+    _li_state["apis_active"] = _active_li_apis()
+
+    return {
+        "posts":    [li_post_to_dict(p) for p in posts],
+        "total":    total,
+        "page":     page,
+        "per_page": per_page,
+        "pages":    max(1, (total + per_page - 1) // per_page),
+        **_li_state,
+    }
+
+
+@app.get("/api/linkedin-posts/status")
+def linkedin_posts_status(_: User = Depends(get_current_user)):
+    _li_state["apis_active"] = _active_li_apis()
+    return _li_state
+
+
+@app.post("/api/linkedin-posts/scrape")
+def trigger_linkedin_scrape(
+    background_tasks: BackgroundTasks,
+    _:      User           = Depends(get_current_user),
+    domain: Optional[str]  = Query(None),
+):
+    if _li_state["is_scraping"]:
+        return {"message": "LinkedIn scrape already running", "status": "busy"}
+    if domain in ("AIML", "DOTNET", "SAP"):
+        background_tasks.add_task(run_linkedin_posts, domain)
+    else:
+        background_tasks.add_task(run_linkedin_posts_all)
+    return {"message": "LinkedIn posts scrape triggered", "status": "started"}
+
+
+# ── Resume optimization endpoint ──────────────────────────────────────────────
+
+@app.post("/api/resume/optimize")
+async def optimize_resume(
+    _:               User       = Depends(get_current_user),
+    resume_file:     UploadFile = File(...),
+    job_description: str        = Form(...),
+):
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="Resume optimization requires ANTHROPIC_API_KEY. Add it to /data/env.conf on EC2.",
+        )
+
+    file_bytes = await resume_file.read()
+    if len(file_bytes) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
+
+    filename = resume_file.filename or "resume.docx"
+    if not job_description or len(job_description.strip()) < 50:
+        raise HTTPException(status_code=400, detail="Job description is too short.")
+
+    try:
+        result = resume_mod.optimize(file_bytes, filename, job_description.strip())
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Optimization failed: {e}")
 
 
 # Serve React frontend — mount assets dir for hashed JS/CSS, catch-all for SPA routes

@@ -73,9 +73,35 @@ class JobApplication(Base):
     is_active    = Column(Boolean, default=True)
 
 
+class LinkedInPost(Base):
+    __tablename__ = "linkedin_posts"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    post_url       = Column(String, unique=True, index=True, nullable=False)
+    author_name    = Column(String, default="")
+    author_title   = Column(String, default="")
+    author_url     = Column(String, default="")
+    content        = Column(Text, default="")
+    posted_at      = Column(String, default="")
+    likes_count    = Column(Integer, default=0)
+    comments_count = Column(Integer, default=0)
+    scraped_at     = Column(DateTime, default=datetime.utcnow)
+    search_query   = Column(String, default="")
+    role_keyword   = Column(String, default="")
+    domain         = Column(String, default="AIML")
+
+
 def create_tables():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    # Migrate: add domain column if missing
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE linkedin_posts ADD COLUMN domain TEXT DEFAULT 'AIML'"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 def get_db():

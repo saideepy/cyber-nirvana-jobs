@@ -8,16 +8,19 @@ import {
 } from 'lucide-react'
 
 const CATEGORY_COLORS = {
-  'Agentic AI Engineer':            'bg-purple-500/20 text-purple-300',
-  'AI / ML Engineer':               'bg-blue-500/20 text-blue-300',
-  'Generative AI / GenAI Engineer': 'bg-pink-500/20 text-pink-300',
-  'LLM Engineer':                   'bg-cyan-500/20 text-cyan-300',
-  'Data Scientist':                 'bg-emerald-500/20 text-emerald-300',
-  'MLOps / LLMOps Engineer':        'bg-amber-500/20 text-amber-300',
-  'NLP Engineer':                   'bg-lime-500/20 text-lime-300',
-  'RAG / LangChain / Vector DB Developer': 'bg-fuchsia-500/20 text-fuchsia-300',
+  'Agentic AI Engineer':            'bg-purple-100 text-purple-700',
+  'AI / ML Engineer':               'bg-blue-100 text-blue-700',
+  'Generative AI / GenAI Engineer': 'bg-pink-100 text-pink-700',
+  'LLM Engineer':                   'bg-cyan-100 text-cyan-700',
+  'Data Scientist':                 'bg-emerald-100 text-emerald-700',
+  'MLOps / LLMOps Engineer':        'bg-amber-100 text-amber-700',
+  'NLP Engineer':                   'bg-lime-100 text-lime-700',
+  'RAG / LangChain / Vector DB Developer': 'bg-fuchsia-100 text-fuchsia-700',
+  '.NET Developer':                 'bg-red-100 text-red-700',
+  'React Developer':                'bg-cyan-100 text-cyan-700',
+  'SAP TM':                         'bg-blue-100 text-blue-700',
 }
-const catColor = (cat) => CATEGORY_COLORS[cat] ?? 'bg-slate-600/30 text-slate-300'
+const catColor = (cat) => CATEGORY_COLORS[cat] ?? 'bg-gray-100 text-gray-600'
 
 function fmtDateTime(iso) {
   if (!iso) return '—'
@@ -74,13 +77,13 @@ function UserModal({ user, onSave, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-md shadow-2xl">
-        <div className="flex items-center justify-between p-5 border-b border-slate-700/50">
-          <h3 className="font-semibold text-slate-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+      <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">
             {isEdit ? 'Edit User' : 'Create New User'}
           </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition-colors">
             <X size={18} />
           </button>
         </div>
@@ -112,7 +115,7 @@ function UserModal({ user, onSave, onClose }) {
               <button
                 type="button"
                 onClick={() => setShowPwd(v => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
                 {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
@@ -123,16 +126,16 @@ function UserModal({ user, onSave, onClose }) {
             <label className="flex items-center gap-3 cursor-pointer select-none">
               <div
                 onClick={() => setIsActive(v => !v)}
-                className={`w-10 h-5 rounded-full transition-colors flex items-center px-0.5 ${isActive ? 'bg-green-500' : 'bg-slate-600'}`}
+                className={`w-10 h-5 rounded-full transition-colors flex items-center px-0.5 ${isActive ? 'bg-green-500' : 'bg-gray-300'}`}
               >
-                <div className={`w-4 h-4 bg-white rounded-full transition-transform ${isActive ? 'translate-x-5' : 'translate-x-0'}`} />
+                <div className={`w-4 h-4 bg-white rounded-full transition-transform shadow-sm ${isActive ? 'translate-x-5' : 'translate-x-0'}`} />
               </div>
-              <span className="text-sm text-slate-300">{isActive ? 'Active' : 'Inactive'}</span>
+              <span className="text-sm text-gray-700">{isActive ? 'Active' : 'Inactive'}</span>
             </label>
           )}
 
           {error && (
-            <div className="p-3 bg-red-900/30 border border-red-500/40 rounded-lg text-sm text-red-300">
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
               {error}
             </div>
           )}
@@ -162,19 +165,19 @@ function DeleteConfirm({ user, onConfirm, onClose }) {
     setLoading(false)
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-sm shadow-2xl p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+      <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-sm shadow-2xl p-6">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center">
-            <Trash2 size={18} className="text-red-400" />
+          <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+            <Trash2 size={18} className="text-red-600" />
           </div>
           <div>
-            <h3 className="font-semibold text-slate-100">Delete User</h3>
-            <p className="text-xs text-slate-400">This action cannot be undone</p>
+            <h3 className="font-semibold text-gray-900">Delete User</h3>
+            <p className="text-xs text-gray-400">This action cannot be undone</p>
           </div>
         </div>
-        <p className="text-sm text-slate-300 mb-6">
-          Are you sure you want to delete <span className="text-white font-semibold">{user.username}</span>?
+        <p className="text-sm text-gray-600 mb-6">
+          Are you sure you want to delete <span className="text-gray-900 font-semibold">{user.username}</span>?
           All their sessions and job applications will be removed.
         </p>
         <div className="flex gap-2">
@@ -191,15 +194,15 @@ function DeleteConfirm({ user, onConfirm, onClose }) {
 
 // ── StatCard ──────────────────────────────────────────────────────────────────
 
-function StatCard({ icon: Icon, label, value, color }) {
+function StatCard({ icon: Icon, label, value, color, bg }) {
   return (
     <div className="card p-5 flex items-center gap-4">
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${color}`}>
-        <Icon size={22} />
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${bg}`}>
+        <Icon size={22} className={color} />
       </div>
       <div>
-        <div className="text-2xl font-bold text-slate-100">{value ?? '—'}</div>
-        <div className="text-xs text-slate-400 mt-0.5">{label}</div>
+        <div className="text-2xl font-bold text-gray-900">{value ?? '—'}</div>
+        <div className="text-xs text-gray-400 mt-0.5">{label}</div>
       </div>
     </div>
   )
@@ -211,39 +214,36 @@ function UserRow({ user, onEdit, onDelete }) {
   const initials = user.username.slice(0, 2).toUpperCase()
   return (
     <div className="card p-4 flex items-start gap-4">
-      {/* Avatar */}
       <div className="relative shrink-0">
-        <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
-          <span className="text-indigo-300 font-bold text-sm">{initials}</span>
+        <div className="w-10 h-10 rounded-xl bg-red-100 border border-red-200 flex items-center justify-center">
+          <span className="text-red-600 font-bold text-sm">{initials}</span>
         </div>
-        <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-800 ${user.is_online ? 'bg-green-400' : 'bg-slate-600'}`} />
+        <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${user.is_online ? 'bg-green-500' : 'bg-gray-300'}`} />
       </div>
 
-      {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-slate-100 text-sm">{user.username}</span>
+          <span className="font-semibold text-gray-900 text-sm">{user.username}</span>
           {!user.is_active && (
-            <span className="badge bg-red-500/15 text-red-400 border border-red-500/30 text-[10px]">Inactive</span>
+            <span className="badge bg-red-100 text-red-600 border border-red-200 text-[10px]">Inactive</span>
           )}
           {user.is_online && (
-            <span className="badge bg-green-500/15 text-green-400 border border-green-500/30 text-[10px] flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            <span className="badge bg-green-100 text-green-700 border border-green-200 text-[10px] flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               Online
             </span>
           )}
         </div>
 
-        <div className="text-xs text-slate-500 mt-0.5">
+        <div className="text-xs text-gray-400 mt-0.5">
           Last login: {fmtDateTime(user.last_login)}
           {user.last_seen && user.is_online && (
-            <span className="ml-2 text-green-400/70">· active {fmtDateTime(user.last_seen)}</span>
+            <span className="ml-2 text-green-500/70">· active {fmtDateTime(user.last_seen)}</span>
           )}
         </div>
 
-        {/* Today's activity */}
         <div className="mt-2 flex items-center gap-2 flex-wrap">
-          <span className={`badge text-[10px] font-medium ${user.apps_today_count > 0 ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' : 'bg-slate-700/50 text-slate-500'}`}>
+          <span className={`badge text-[10px] font-medium ${user.apps_today_count > 0 ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-gray-100 text-gray-400'}`}>
             {user.apps_today_count} applied today
           </span>
           {user.categories_today.map(cat => (
@@ -254,18 +254,17 @@ function UserRow({ user, onEdit, onDelete }) {
         </div>
       </div>
 
-      {/* Actions */}
       <div className="flex items-center gap-1 shrink-0">
         <button
           onClick={() => onEdit(user)}
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-300 hover:bg-blue-500/10 transition-all"
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
           title="Edit user"
         >
           <Edit2 size={14} />
         </button>
         <button
           onClick={() => onDelete(user)}
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all"
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
           title="Delete user"
         >
           <Trash2 size={14} />
@@ -284,7 +283,7 @@ export default function AdminPage() {
   const [users,     setUsers]     = useState([])
   const [dashboard, setDashboard] = useState(null)
   const [loading,   setLoading]   = useState(true)
-  const [modal,     setModal]     = useState(null) // null | 'create' | { edit: user } | { delete: user }
+  const [modal,     setModal]     = useState(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -317,21 +316,20 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
       <header className="header-glow sticky top-0 z-40">
         <div className="max-w-screen-xl mx-auto px-4 py-3 flex items-center gap-4">
-          {/* Logo */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/50"
-              style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-md shadow-red-200"
+              style={{ background: 'linear-gradient(135deg, #dc2626 0%, #ea580c 100%)' }}>
               <span className="text-white font-bold text-xs" style={{ fontFamily: 'Georgia, serif' }}>CN</span>
             </div>
             <div className="leading-none">
-              <div className="text-base font-black tracking-widest bg-clip-text text-transparent"
+              <div className="text-base font-black tracking-widest"
                 style={{
                   fontFamily: "'Cinzel', Georgia, serif",
-                  background: 'linear-gradient(90deg, #a5b4fc 0%, #c4b5fd 50%, #818cf8 100%)',
+                  background: 'linear-gradient(90deg, #dc2626 0%, #ea580c 50%, #dc2626 100%)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   letterSpacing: '0.12em',
@@ -341,32 +339,22 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <span className="badge bg-rose-500/15 text-rose-400 border border-rose-500/30 text-xs">
+          <span className="badge bg-red-100 text-red-600 border border-red-200 text-xs">
             <Shield size={11} /> Admin Panel
           </span>
 
           <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={() => navigate('/')}
-              className="btn-ghost text-xs px-3 py-1.5"
-            >
+            <button onClick={() => navigate('/')} className="btn-ghost text-xs px-3 py-1.5">
               <ArrowLeft size={13} /> Job Board
             </button>
-            <button
-              onClick={fetchData}
-              className="btn-ghost text-xs px-3 py-1.5"
-              title="Refresh"
-            >
+            <button onClick={fetchData} className="btn-ghost text-xs px-3 py-1.5" title="Refresh">
               <RefreshCw size={13} />
             </button>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 text-xs text-slate-300">
-              <User size={12} className="text-indigo-400" />
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-lg border border-gray-200 text-xs text-gray-700">
+              <User size={12} className="text-red-500" />
               {user?.username}
             </div>
-            <button
-              onClick={handleLogout}
-              className="btn-ghost text-xs px-3 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-            >
+            <button onClick={handleLogout} className="btn-ghost text-xs px-3 py-1.5 text-red-500 hover:text-red-600 hover:bg-red-50">
               <LogOut size={13} /> Logout
             </button>
           </div>
@@ -376,37 +364,32 @@ export default function AdminPage() {
       {/* Main */}
       <main className="max-w-screen-xl mx-auto w-full px-4 py-6 flex-1">
         {loading && !dashboard ? (
-          <div className="flex items-center justify-center py-20 gap-3 text-slate-500">
-            <Loader2 size={20} className="animate-spin" />
+          <div className="flex items-center justify-center py-20 gap-3 text-gray-400">
+            <Loader2 size={20} className="animate-spin text-red-500" />
             <span className="text-sm">Loading dashboard…</span>
           </div>
         ) : (
           <>
-            {/* Stats row */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              <StatCard icon={Users}     label="Total Users"       value={dashboard?.total_users}  color="bg-indigo-500/15 text-indigo-400" />
-              <StatCard icon={Activity}  label="Online Now"        value={dashboard?.online_now}   color="bg-green-500/15 text-green-400" />
-              <StatCard icon={LayoutGrid} label="Applications Today" value={dashboard?.apps_today} color="bg-blue-500/15 text-blue-400" />
-              <StatCard icon={Users}     label="Active Users"      value={dashboard?.active_users} color="bg-purple-500/15 text-purple-400" />
+              <StatCard icon={Users}      label="Total Users"         value={dashboard?.total_users}  color="text-red-600"    bg="bg-red-100" />
+              <StatCard icon={Activity}   label="Online Now"          value={dashboard?.online_now}   color="text-green-600"  bg="bg-green-100" />
+              <StatCard icon={LayoutGrid} label="Applications Today"  value={dashboard?.apps_today}   color="text-blue-600"   bg="bg-blue-100" />
+              <StatCard icon={Users}      label="Active Users"        value={dashboard?.active_users} color="text-violet-600" bg="bg-violet-100" />
             </div>
 
-            {/* Users section */}
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold text-slate-100">
+              <h2 className="text-base font-semibold text-gray-900">
                 Users
-                <span className="ml-2 text-sm font-normal text-slate-500">({users.length})</span>
+                <span className="ml-2 text-sm font-normal text-gray-400">({users.length})</span>
               </h2>
-              <button
-                onClick={() => setModal('create')}
-                className="btn-primary text-xs px-3 py-1.5"
-              >
+              <button onClick={() => setModal('create')} className="btn-primary text-xs px-3 py-1.5">
                 <Plus size={13} /> Add User
               </button>
             </div>
 
             {users.length === 0 ? (
-              <div className="card p-12 flex flex-col items-center gap-3 text-slate-500">
-                <Users size={36} className="text-slate-700" />
+              <div className="card p-12 flex flex-col items-center gap-3 text-gray-400">
+                <Users size={36} className="text-gray-300" />
                 <p className="text-sm">No users yet. Create the first one.</p>
               </div>
             ) : (
@@ -425,20 +408,11 @@ export default function AdminPage() {
         )}
       </main>
 
-      {/* Modals */}
       {modal === 'create' && (
-        <UserModal
-          user={null}
-          onSave={() => { setModal(null); fetchData() }}
-          onClose={() => setModal(null)}
-        />
+        <UserModal user={null} onSave={() => { setModal(null); fetchData() }} onClose={() => setModal(null)} />
       )}
       {modal?.edit && (
-        <UserModal
-          user={modal.edit}
-          onSave={() => { setModal(null); fetchData() }}
-          onClose={() => setModal(null)}
-        />
+        <UserModal user={modal.edit} onSave={() => { setModal(null); fetchData() }} onClose={() => setModal(null)} />
       )}
       {modal?.delete && (
         <DeleteConfirm

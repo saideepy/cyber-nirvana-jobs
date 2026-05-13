@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Search, RefreshCw, Clock, Zap, LogOut, User, Shield } from 'lucide-react'
+import { Search, RefreshCw, Clock, Zap, LogOut, User, Shield, FileText } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
-export default function Header({ search, onSearch, stats, onTriggerScrape, user, onLogout }) {
+export default function Header({ search, onSearch, stats, onTriggerScrape, user, onLogout, onOpenResumeEditor }) {
   const [triggering, setTriggering] = useState(false)
 
   const handleTrigger = async () => {
@@ -26,8 +26,8 @@ export default function Header({ search, onSearch, stats, onTriggerScrape, user,
         <div className="flex items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-3 min-w-fit">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/50 shrink-0"
-              style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md shadow-red-200/60 shrink-0"
+              style={{ background: 'linear-gradient(135deg, #dc2626 0%, #ea580c 100%)' }}>
               <span className="text-white font-bold text-sm tracking-tight" style={{ fontFamily: 'Georgia, serif' }}>CN</span>
             </div>
             <div className="leading-none">
@@ -35,7 +35,7 @@ export default function Header({ search, onSearch, stats, onTriggerScrape, user,
                 className="text-xl font-black tracking-widest bg-clip-text text-transparent"
                 style={{
                   fontFamily: "'Cinzel', Georgia, serif",
-                  background: 'linear-gradient(90deg, #a5b4fc 0%, #c4b5fd 50%, #818cf8 100%)',
+                  background: 'linear-gradient(90deg, #dc2626 0%, #ea580c 50%, #dc2626 100%)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   letterSpacing: '0.12em',
@@ -43,15 +43,15 @@ export default function Header({ search, onSearch, stats, onTriggerScrape, user,
               >
                 CYBER NIRVANA
               </div>
-              <div className="text-[10px] text-slate-500 font-medium tracking-widest uppercase mt-0.5">
-                AI / ML Contract Jobs
+              <div className="text-[10px] text-gray-400 font-medium tracking-widest uppercase mt-0.5">
+                Contract Job Board
               </div>
             </div>
           </div>
 
           {/* Search */}
           <div className="flex-1 max-w-2xl relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
               type="text"
               className="input w-full pl-9"
@@ -66,21 +66,31 @@ export default function Header({ search, onSearch, stats, onTriggerScrape, user,
             {/* Scraper status */}
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border
               ${stats?.is_scraping
-                ? 'bg-blue-500/10 border-blue-500/40 text-blue-300 scraping-active'
-                : 'bg-slate-800 border-slate-600 text-slate-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${stats?.is_scraping ? 'bg-blue-400 animate-pulse' : 'bg-slate-500'}`} />
+                ? 'bg-red-50 border-red-300 text-red-600 scraping-active'
+                : 'bg-gray-100 border-gray-200 text-gray-500'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${stats?.is_scraping ? 'bg-red-500 animate-pulse' : 'bg-gray-400'}`} />
               {stats?.is_scraping ? 'Scraping…' : 'Idle'}
             </div>
 
-            <div className="hidden lg:flex items-center gap-1 text-xs text-slate-500">
+            <div className="hidden lg:flex items-center gap-1 text-xs text-gray-400">
               <Clock size={11} />
               <span>{lastScraped}</span>
             </div>
 
-            <div className="hidden xl:flex items-center gap-1 text-xs text-slate-500">
+            <div className="hidden xl:flex items-center gap-1 text-xs text-gray-400">
               <Zap size={11} />
               <span>next {nextScrape}</span>
             </div>
+
+            {/* Resume Editor — visible across all tabs */}
+            <button
+              onClick={onOpenResumeEditor}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border
+                bg-white text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 transition-all shadow-sm"
+            >
+              <FileText size={13} />
+              Resume Editor
+            </button>
 
             <button
               onClick={handleTrigger}
@@ -91,23 +101,21 @@ export default function Header({ search, onSearch, stats, onTriggerScrape, user,
               Scrape Now
             </button>
 
-            {/* Admin link (admin users only) */}
             {user?.is_admin && (
-              <Link to="/admin" className="btn-ghost text-xs px-3 py-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
+              <Link to="/admin" className="btn-ghost text-xs px-3 py-1.5 text-red-600 hover:text-red-700 hover:bg-red-50">
                 <Shield size={13} /> Admin
               </Link>
             )}
 
-            {/* User info + logout */}
             {user && (
-              <div className="flex items-center gap-1.5 pl-2 border-l border-slate-700">
-                <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 bg-slate-800/50 rounded-lg border border-slate-700/50 text-xs text-slate-300">
-                  <User size={11} className="text-indigo-400" />
+              <div className="flex items-center gap-1.5 pl-2 border-l border-gray-200">
+                <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 bg-gray-100 rounded-lg border border-gray-200 text-xs text-gray-700">
+                  <User size={11} className="text-red-500" />
                   {user.username}
                 </div>
                 <button
                   onClick={onLogout}
-                  className="btn-ghost text-xs px-2 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                  className="btn-ghost text-xs px-2 py-1.5 text-red-500 hover:text-red-600 hover:bg-red-50"
                   title="Logout"
                 >
                   <LogOut size={13} />
